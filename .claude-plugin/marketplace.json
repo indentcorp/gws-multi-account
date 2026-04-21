@@ -1,0 +1,23 @@
+{
+  "name": "gws-multi-account",
+  "owner": {
+    "name": "devxoul",
+    "url": "https://github.com/devxoul"
+  },
+  "metadata": {
+    "description": "Multi-account management for the Google Workspace CLI (`gws`).",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "gws-multi-account",
+      "source": "./plugins/gws-multi-account",
+      "description": "Enforces the gws-multi-account layout: blocks bare `gws` CLI commands that do not set GOOGLE_WORKSPACE_CLI_CONFIG_DIR, and ships the matching skill so Claude picks the right account automatically.",
+      "homepage": "https://github.com/devxoul/gws-multi-account",
+      "repository": "https://github.com/devxoul/gws-multi-account",
+      "license": "MIT",
+      "keywords": ["gws", "google-workspace", "hooks", "multi-account"],
+      "category": "productivity"
+    }
+  ]
+}

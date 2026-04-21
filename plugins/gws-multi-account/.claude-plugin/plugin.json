@@ -1,0 +1,8 @@
+{
+  "name": "gws-multi-account",
+  "version": "0.1.0",
+  "description": "Enforces the gws-multi-account layout: blocks bare `gws` CLI commands that do not set GOOGLE_WORKSPACE_CLI_CONFIG_DIR.",
+  "license": "MIT",
+  "keywords": ["gws", "google-workspace", "hooks", "multi-account"],
+  "hooks": "./hooks/hooks.json"
+}
