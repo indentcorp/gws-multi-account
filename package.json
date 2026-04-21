@@ -1,6 +1,6 @@
 {
   "name": "opencode-gws-multi-account",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Multi-account management for the Google Workspace CLI (`gws`). Ships an opencode plugin (published to npm) and a Claude Code plugin (published via .claude-plugin marketplace).",
   "keywords": [
     "claude-code",
