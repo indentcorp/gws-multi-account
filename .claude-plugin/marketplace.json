@@ -1,23 +1,24 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "gws-multi-account",
+  "description": "Multi-account management for the Google Workspace CLI (`gws`).",
   "owner": {
-    "name": "devxoul",
+    "name": "Jeon Suyeol",
     "url": "https://github.com/devxoul"
-  },
-  "metadata": {
-    "description": "Multi-account management for the Google Workspace CLI (`gws`).",
-    "version": "0.1.0"
   },
   "plugins": [
     {
       "name": "gws-multi-account",
-      "source": ".",
       "description": "Enforces the gws-multi-account layout: blocks bare `gws` CLI commands that do not set GOOGLE_WORKSPACE_CLI_CONFIG_DIR, and ships the matching skill so Claude picks the right account automatically.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Jeon Suyeol",
+        "url": "https://github.com/devxoul"
+      },
+      "source": "./",
+      "category": "productivity",
       "homepage": "https://github.com/devxoul/gws-multi-account",
-      "repository": "https://github.com/devxoul/gws-multi-account",
-      "license": "MIT",
-      "keywords": ["gws", "google-workspace", "hooks", "multi-account"],
-      "category": "productivity"
+      "keywords": ["gws", "google-workspace", "hooks", "multi-account"]
     }
   ]
 }
