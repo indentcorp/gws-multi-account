@@ -1,0 +1,19 @@
+node_modules/
+*.tsbuildinfo
+
+# Build outputs:
+#   dist/   — opencode plugin build (loaded from node_modules by opencode users)
+# NOT ignored: hooks/*.js is the pre-built Claude Code hook, COMMITTED because
+# Claude Code's marketplace install clones from GitHub and cannot run `bun build`.
+dist/
+
+# OS / editor artifacts
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Local tooling state
+.sisyphus/

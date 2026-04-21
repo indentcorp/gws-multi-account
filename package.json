@@ -1,0 +1,64 @@
+{
+  "name": "opencode-gws-multi-account",
+  "version": "0.1.0",
+  "description": "Multi-account management for the Google Workspace CLI (`gws`). Ships an opencode plugin (published to npm) and a Claude Code plugin (published via .claude-plugin marketplace).",
+  "keywords": [
+    "claude-code",
+    "claude-plugin",
+    "google-workspace",
+    "gws",
+    "hooks",
+    "multi-account",
+    "opencode",
+    "opencode-plugin"
+  ],
+  "homepage": "https://github.com/devxoul/gws-multi-account",
+  "license": "MIT",
+  "author": "Jeon Suyeol",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devxoul/gws-multi-account.git"
+  },
+  "files": [
+    "dist",
+    "skills",
+    ".claude-plugin",
+    "hooks",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/opencode/plugin.js",
+  "types": "./dist/opencode/plugin.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/opencode/plugin.d.ts",
+      "default": "./dist/opencode/plugin.js"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "bun build.ts",
+    "test": "bun run build && bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "prepublishOnly": "bun run build"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.14.19",
+    "@types/bun": "latest",
+    "@types/node": "^25.6.0",
+    "oxfmt": "^0.46.0",
+    "oxlint": "^1.61.0",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.14.0"
+  },
+  "engines": {
+    "bun": ">=1.3.0",
+    "node": ">=18"
+  }
+}

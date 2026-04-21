@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "gws-multi-account",
-      "source": "./plugins/claude",
+      "source": ".",
       "description": "Enforces the gws-multi-account layout: blocks bare `gws` CLI commands that do not set GOOGLE_WORKSPACE_CLI_CONFIG_DIR, and ships the matching skill so Claude picks the right account automatically.",
       "homepage": "https://github.com/devxoul/gws-multi-account",
       "repository": "https://github.com/devxoul/gws-multi-account",

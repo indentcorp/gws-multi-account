@@ -1,11 +1,9 @@
 import type { Plugin } from '@opencode-ai/plugin'
-import { buildDenyMessage, findViolation } from './parser.js'
-import {
-  configPathCandidates,
-  registerSkillPath,
-  resolveBundledSkillsDir,
-} from './skill-registration.js'
 
+import { buildDenyMessage, findViolation } from '../parser.js'
+import { configPathCandidates, registerSkillPath, resolveBundledSkillsDir } from './skill-registration.js'
+
+const PLUGIN_NAME = 'opencode-gws-multi-account plugin'
 const SKIP_ENV = 'OPENCODE_GWS_SKIP_SKILL_REGISTRATION'
 
 export const GwsMultiAccountPlugin: Plugin = async ({ directory, worktree }) => {
@@ -24,7 +22,7 @@ export const GwsMultiAccountPlugin: Plugin = async ({ directory, worktree }) => 
 
       const violation = findViolation(command)
       if (violation) {
-        throw new Error(buildDenyMessage(violation))
+        throw new Error(buildDenyMessage(violation, PLUGIN_NAME))
       }
     },
   }

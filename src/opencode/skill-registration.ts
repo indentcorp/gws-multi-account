@@ -3,9 +3,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// Published layout: dist/opencode/plugin.js → ../../skills relative to the
+// running module resolves to the package's bundled `skills/` directory.
 export async function resolveBundledSkillsDir(): Promise<string | null> {
   const here = path.dirname(fileURLToPath(import.meta.url))
-  const candidate = path.resolve(here, '..', 'skills')
+  const candidate = path.resolve(here, '..', '..', 'skills')
   try {
     const stat = await fs.stat(candidate)
     return stat.isDirectory() ? candidate : null
@@ -19,10 +21,7 @@ export type ConfigCandidate = { path: string; format: 'json' | 'jsonc' }
 // opencode accepts either opencode.json or opencode.jsonc. We list every
 // filename that could exist in both project and global scope, in resolution
 // order: project.jsonc, project.json, global.jsonc, global.json.
-export function configPathCandidates(project: {
-  directory?: string
-  worktree?: string
-}): ConfigCandidate[] {
+export function configPathCandidates(project: { directory?: string; worktree?: string }): ConfigCandidate[] {
   const globalDir = path.join(os.homedir(), '.config', 'opencode')
   const global: ConfigCandidate[] = [
     { path: path.join(globalDir, 'opencode.jsonc'), format: 'jsonc' },
@@ -70,7 +69,9 @@ async function readJson(filePath: string): Promise<Record<string, unknown> | nul
 // surprise; this function returns a new object and never touches siblings.
 function withSkillsPath(config: Record<string, unknown>, skillsDir: string): Record<string, unknown> | null {
   const skills = (config.skills as Record<string, unknown> | undefined) ?? {}
-  const existing = Array.isArray(skills.paths) ? (skills.paths as unknown[]).filter((p): p is string => typeof p === 'string') : []
+  const existing = Array.isArray(skills.paths)
+    ? (skills.paths as unknown[]).filter((p): p is string => typeof p === 'string')
+    : []
 
   if (existing.includes(skillsDir)) return null
 

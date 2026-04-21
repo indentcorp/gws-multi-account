@@ -1,6 +1,6 @@
 ---
 name: gws-multi-account
-description: "Run the gws CLI (Google Workspace CLI) against multiple accounts stored under ~/.config/gws/<email>/, with metadata in ~/.config/gws/accounts.json. Always load this skill when executing any gws command so the right account is selected. Also handles migrating a legacy flat ~/.config/gws/ setup into the per-account layout."
+description: 'Run the gws CLI (Google Workspace CLI) against multiple accounts stored under ~/.config/gws/<email>/, with metadata in ~/.config/gws/accounts.json. Always load this skill when executing any gws command so the right account is selected. Also handles migrating a legacy flat ~/.config/gws/ setup into the per-account layout.'
 ---
 
 # gws — Multi-Account
@@ -135,9 +135,11 @@ Walk the user through this step by step. **Do not skip the confirmation.**
 1. **Detect and report.** Tell the user: "I found a legacy `gws` config at `~/.config/gws/`. I'd like to move it into the per-account layout."
 
 2. **Identify the account.** Run a cheap call against the existing config to learn which email it belongs to:
+
    ```bash
    gws gmail users getProfile --params '{"userId":"me"}'
    ```
+
    Confirm the returned `emailAddress` with the user: "This config belongs to `<email>` — correct?"
 
 3. **Ask for a description.** "How should I describe this account in `accounts.json`? (e.g., 'Personal Gmail', 'Work — Acme')."
@@ -149,6 +151,7 @@ Walk the user through this step by step. **Do not skip the confirmation.**
    - Leave `~/.config/gws/.gitignore` (if present) untouched at the root.
 
 5. **Execute after the user confirms:**
+
    ```bash
    EMAIL="<email>"
    DESC="<description>"
@@ -172,10 +175,12 @@ Walk the user through this step by step. **Do not skip the confirmation.**
    ```
 
 6. **Verify the migration:**
+
    ```bash
    GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/"$EMAIL" \
      gws gmail users getProfile --params '{"userId":"me"}'
    ```
+
    Expect the same `emailAddress` as before.
 
 7. **Tell the user** they should now invoke `gws` with `GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<email>` on every call. Bare `gws ...` without the env var will no longer find credentials.

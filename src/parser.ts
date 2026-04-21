@@ -49,9 +49,9 @@ export function findViolation(command: string): string | null {
   return null
 }
 
-export function buildDenyMessage(segment: string): string {
+export function buildDenyMessage(segment: string, pluginName: string): string {
   return (
-    'Bare `gws` blocked by opencode-gws-multi-account plugin. ' +
+    `Bare \`gws\` blocked by ${pluginName}. ` +
     `The gws-multi-account layout requires \`${ENV_VAR}=~/.config/gws/<email>\` on every invocation. ` +
     `Offending segment: \`${segment}\`. ` +
     `Fix: prefix the command, e.g. \`${ENV_VAR}=~/.config/gws/<email> ${segment}\`. ` +
