@@ -1,39 +1,50 @@
 # gws-multi-account
 
-A [Claude Code](https://claude.com/claude-code) plugin marketplace for [`gws`](https://github.com/googleworkspace/cli), the Google Workspace CLI.
+Multi-account management for [`gws`](https://github.com/googleworkspace/cli), the Google Workspace CLI — shipped as plugins for two agentic coding tools.
 
-Ships one plugin — **gws-multi-account** — that combines:
+Each plugin combines:
 
-- A **skill** teaching Claude how to manage multiple `gws` accounts under `~/.config/gws/<email>/`.
-- A **PreToolUse hook** that blocks every `gws` call that forgets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR`, so Claude cannot accidentally use the wrong account.
+- A **skill** teaching the agent how to manage multiple `gws` accounts under `~/.config/gws/<email>/`.
+- A **tool-call hook** that blocks every `gws` invocation that forgets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR`, so the agent cannot accidentally use the wrong account.
 
-## Install
+## Available plugins
 
-```
-/plugin marketplace add devxoul/gws-multi-account
-/plugin install gws-multi-account@gws-multi-account
-```
+| Host | Location | Install |
+|---|---|---|
+| [Claude Code](https://claude.com/claude-code) | [`plugins/gws-multi-account/`](./plugins/gws-multi-account/) | `/plugin marketplace add devxoul/gws-multi-account` then `/plugin install gws-multi-account@gws-multi-account` |
+| [opencode](https://opencode.ai) | [`plugins/opencode-gws-multi-account/`](./plugins/opencode-gws-multi-account/) | add `"opencode-gws-multi-account"` to `plugin` in `opencode.json` |
 
-Full instructions, prerequisites, migration guide, and uninstall steps are in the plugin README: [`plugins/gws-multi-account/README.md`](./plugins/gws-multi-account/README.md).
+See each plugin's README for full prerequisites, migration guide, and uninstall steps.
 
 ## Platform support
 
-macOS, Linux, and Windows. The hook is a pure Node.js script and depends only on the Node runtime that Claude Code already bundles — no `bash`, `jq`, or shell utilities required.
+macOS, Linux, and Windows. Both plugins use only the runtime their host already bundles (Node in Claude Code, Bun in opencode) — no `bash`, `jq`, or shell utilities required.
 
 ## Layout
 
 ```
 .
 ├── .claude-plugin/
-│   └── marketplace.json              # Marketplace catalog (advertised by this repo)
+│   └── marketplace.json                     # Claude Code marketplace catalog
 └── plugins/
-    └── gws-multi-account/            # The one plugin in this marketplace
-        ├── .claude-plugin/plugin.json
-        ├── hooks/hooks.json
-        ├── scripts/block-bare-gws.mjs
+    ├── gws-multi-account/                   # Claude Code plugin
+    │   ├── .claude-plugin/plugin.json
+    │   ├── hooks/hooks.json
+    │   ├── scripts/block-bare-gws.mjs
+    │   ├── skills/gws-multi-account/SKILL.md
+    │   └── README.md
+    └── opencode-gws-multi-account/          # opencode plugin (TypeScript, npm-publishable)
+        ├── package.json
+        ├── tsconfig.json
+        ├── src/
+        │   ├── index.ts
+        │   ├── parser.ts
+        │   └── skill-registration.ts
         ├── skills/gws-multi-account/SKILL.md
         └── README.md
 ```
+
+The two `SKILL.md` files are identical copies — they document the same contract for two different hosts. If you edit one, update the other.
 
 ## License
 

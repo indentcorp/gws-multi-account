@@ -1,0 +1,50 @@
+{
+  "name": "opencode-gws-multi-account",
+  "version": "0.1.0",
+  "description": "opencode plugin that enforces the gws-multi-account layout: blocks bare `gws` CLI commands that do not set GOOGLE_WORKSPACE_CLI_CONFIG_DIR, and registers the matching skill.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "bun run build"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "gws",
+    "google-workspace",
+    "multi-account",
+    "hooks"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/devxoul/gws-multi-account",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devxoul/gws-multi-account.git",
+    "directory": "plugins/opencode-gws-multi-account"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.14.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.14.19",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.3"
+  }
+}
