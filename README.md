@@ -85,7 +85,7 @@ bun run format:check
 - **`hooks/hook.js`** is **committed to git.** Claude Code's marketplace installer clones from GitHub and cannot run `bun build`, so the pre-built hook must be present in the tree.
 - **`dist/`** is **gitignored.** opencode users install from npm, where `prepublishOnly` runs the build and `files` ships only `dist/`, `skills/`, `hooks/`, and `.claude-plugin/`.
 
-After editing `src/`, run `bun run build` before committing so `hooks/hook.js` stays in sync.
+After editing `src/`, run `bun run build` before committing so `hooks/hook.js` stays in sync. CI runs the full pipeline on every push/PR (`bun run lint`, `format:check`, `typecheck`, `test`) and then verifies no drift via `git diff --exit-code hooks/` — so if you forget to rebuild, the check fails with a clear message.
 
 ## Design notes
 
