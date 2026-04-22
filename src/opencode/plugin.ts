@@ -37,12 +37,12 @@ async function registerSkillOnStartup(project: { directory?: string; worktree?: 
 
   switch (result.kind) {
     case 'registered':
-      console.log(
+      console.debug(
         `[opencode-gws-multi-account] Registered skill path in ${result.configPath}. Restart opencode to load the skill.`,
       )
       return
     case 'needs-manual-edit':
-      console.log(
+      console.debug(
         `[opencode-gws-multi-account] Detected JSONC config at ${result.configPath}. Add this entry to \`skills.paths\` manually to load the bundled skill:\n  ${result.skillsDir}`,
       )
       return
