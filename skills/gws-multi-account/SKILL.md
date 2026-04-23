@@ -57,14 +57,14 @@ Flat object keyed by email. Each value is metadata for that account.
    - User says `"work"` / company name → match by description.
    - User gives a full email → use it directly if present in `accounts.json`.
    - If ambiguous, ask the user to pick.
-3. Set `GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<email>` for the command.
+3. Set `GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws/<email>"` for the command. **Use `$HOME`, never a literal `~`** — `~` does not expand inside quoted values or when the command isn't run through a shell, and `gws` will then create a stray `~/.config/gws/...` directory under `$PWD`.
 
 ### macOS / Linux / Git Bash / WSL
 
 ```bash
 cat ~/.config/gws/accounts.json
 
-GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/alice@example.com \
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws/alice@example.com" \
   gws gmail users messages list --params '{"userId":"me"}'
 ```
 
@@ -90,6 +90,7 @@ Works identically across every `gws` service (gmail, calendar, drive, sheets, do
 ## Rules for agents
 
 - **Always set `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` explicitly.** Never rely on a shell default or an exported variable — the invocation must be self-contained.
+- **Never pass a literal `~` in the env var value.** Use `"$HOME/.config/gws/<email>"` on POSIX, `"$env:USERPROFILE\.config\gws\<email>"` on PowerShell, `"%USERPROFILE%\.config\gws\<email>"` on cmd. A literal `~` does **not** expand when quoted or when the command is run outside an interactive shell — `gws` will silently create a stray `~/.config/gws/...` directory under `$PWD` instead of writing to the real home directory. The `gws-multi-account` hook blocks bare `~` values with an explanatory error.
 - **Never invent an account.** If the user hasn't specified one and you can't confidently pick from `accounts.json`, ask.
 - **Never write to `accounts.json` silently.** Only modify it during the migration / add-account flows below, and only with the user's confirmation.
 - **Never log or echo credential file contents** (`credentials.enc`, `token_cache.json`, `.encryption_key`).
@@ -105,19 +106,19 @@ When the user wants to register a new account:
    - PowerShell: `New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\gws\<email>"`
 4. Run the `gws auth` login flow against that directory. If the user already has a `client_secret.json`, drop it into `~/.config/gws/<email>/client_secret.json` before running `gws auth login`.
    ```bash
-   GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<email> \
+   GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws/<email>" \
      GOOGLE_WORKSPACE_CLI_CLIENT_ID=<client_id> \
      GOOGLE_WORKSPACE_CLI_CLIENT_SECRET=<client_secret> \
      gws auth login
    ```
 5. Append the account to `accounts.json` (preserve existing entries). Use Node for cross-platform JSON merging — no `jq` dependency. Node is guaranteed present on any machine running Claude Code or opencode.
    ```bash
-   GWS_ACCOUNTS_JSON=~/.config/gws/accounts.json EMAIL=<email> DESC=<description> \
+   GWS_ACCOUNTS_JSON="$HOME/.config/gws/accounts.json" EMAIL=<email> DESC=<description> \
      node -e "const fs=require('fs'),p=process.env.GWS_ACCOUNTS_JSON;const d=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};d[process.env.EMAIL]={description:process.env.DESC};fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n');"
    ```
 6. Verify:
    ```bash
-   GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<email> \
+   GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws/<email>" \
      gws gmail users getProfile --params '{"userId":"me"}'
    ```
 
@@ -188,7 +189,7 @@ Walk the user through this step by step. **Do not skip the confirmation.**
      fi
    done
 
-   GWS_ACCOUNTS_JSON=~/.config/gws/accounts.json EMAIL="$EMAIL" DESC="$DESC" \
+   GWS_ACCOUNTS_JSON="$HOME/.config/gws/accounts.json" EMAIL="$EMAIL" DESC="$DESC" \
      node -e "const fs=require('fs'),p=process.env.GWS_ACCOUNTS_JSON;const d=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};d[process.env.EMAIL]={description:process.env.DESC};fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n');"
    ```
 
@@ -217,7 +218,7 @@ Walk the user through this step by step. **Do not skip the confirmation.**
 
 6. **Verify the migration.** Use the platform-appropriate command from [Selecting an account](#selecting-an-account) above and expect the same `emailAddress` as before.
 
-7. **Tell the user** they should now invoke `gws` with `GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<email>` on every call. Bare `gws ...` without the env var will no longer find credentials.
+7. **Tell the user** they should now invoke `gws` with `GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws/<email>"` on every call (a literal `~` won't expand when quoted — use `$HOME`). Bare `gws ...` without the env var will no longer find credentials.
 
 ### Partial / broken migrations
 
