@@ -19,12 +19,28 @@ describe('parser.findViolation', () => {
     ['unrelated var prefix', 'FOO=bar gws drive files list'],
     ['bare gws via semicolon', 'ls ; gws drive files list'],
     ['bare gws via ||', 'false || gws drive files list'],
-  ])('denies: %s', (_label, cmd) => {
-    expect(findViolation(cmd)).not.toBeNull()
+  ])('denies (missing-env): %s', (_label, cmd) => {
+    const v = findViolation(cmd)
+    expect(v).not.toBeNull()
+    expect(v!.kind).toBe('missing-env')
   })
 
   test.each([
-    ['gws with config dir', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws gmail users getProfile'],
+    ['double-quoted tilde', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~/.config/gws/a@b.com" gws drive files list'],
+    ['single-quoted tilde', "GOOGLE_WORKSPACE_CLI_CONFIG_DIR='~/.config/gws/a@b.com' gws drive files list"],
+    ['env + quoted tilde', 'env GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~/.config/gws/a@b.com" gws drive files list'],
+    ['quoted tilde bare', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~" gws drive files list'],
+  ])('denies (literal-tilde): %s', (_label, cmd) => {
+    const v = findViolation(cmd)
+    expect(v).not.toBeNull()
+    expect(v!.kind).toBe('literal-tilde')
+  })
+
+  test.each([
+    ['absolute path', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws gmail users getProfile'],
+    ['quoted absolute path', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="/tmp/a" gws gmail users getProfile'],
+    ['unquoted tilde (bash expands it)', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/a@b.com gws drive files list'],
+    ['$HOME expansion', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws/a@b.com" gws drive files list'],
     ['env + gws', 'env GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws gmail users getProfile'],
     ['mixed prefix', 'FOO=bar GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files list'],
     ['cd; then env gws', 'cd /tmp && GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files list'],
@@ -38,15 +54,30 @@ describe('parser.findViolation', () => {
 })
 
 describe('parser.buildDenyMessage', () => {
-  const msg = buildDenyMessage('gws drive files list', 'test-plugin')
-  test('includes plugin name', () => {
-    expect(msg).toContain('test-plugin')
+  const missing = buildDenyMessage({ kind: 'missing-env', segment: 'gws drive files list' }, 'test-plugin')
+  test('missing-env: includes plugin name', () => {
+    expect(missing).toContain('test-plugin')
   })
-  test('includes env var', () => {
-    expect(msg).toContain('GOOGLE_WORKSPACE_CLI_CONFIG_DIR')
+  test('missing-env: includes env var', () => {
+    expect(missing).toContain('GOOGLE_WORKSPACE_CLI_CONFIG_DIR')
   })
-  test('includes offending segment', () => {
-    expect(msg).toContain('gws drive files list')
+  test('missing-env: includes offending segment', () => {
+    expect(missing).toContain('gws drive files list')
+  })
+  test('missing-env: suggests $HOME', () => {
+    expect(missing).toContain('$HOME')
+  })
+
+  const tilde = buildDenyMessage(
+    { kind: 'literal-tilde', segment: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~/.config/gws/a@b.com" gws drive files list' },
+    'test-plugin',
+  )
+  test('literal-tilde: mentions quoted tilde', () => {
+    expect(tilde).toContain('~')
+    expect(tilde.toLowerCase()).toContain('expand')
+  })
+  test('literal-tilde: suggests $HOME fix', () => {
+    expect(tilde).toContain('$HOME')
   })
 })
 
@@ -68,6 +99,16 @@ describe('opencode plugin entry', () => {
         { args: { command: 'gws drive files list' } },
       ),
     ).rejects.toThrow('opencode-gws-multi-account plugin')
+  })
+
+  test('throws on quoted literal tilde', async () => {
+    const hooks = await getHook()
+    await expect(
+      hooks['tool.execute.before']!(
+        { tool: 'bash', sessionID: 's', callID: 'c' },
+        { args: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~/.config/gws/a@b.com" gws drive files list' } },
+      ),
+    ).rejects.toThrow(/\$HOME/)
   })
 
   test('passes on env-prefixed gws', async () => {
@@ -221,5 +262,18 @@ describe('claude code hook (smoke)', () => {
       encoding: 'utf8',
     })
     expect((result.stdout ?? '').trim()).toBe('')
+  })
+
+  test('denies quoted literal tilde with $HOME hint', () => {
+    const result = spawnSync('node', [hookPath], {
+      input: JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~/.config/gws/a@b.com" gws x' },
+      }),
+      encoding: 'utf8',
+    })
+    const out = (result.stdout ?? '').trim()
+    expect(out).toContain('"permissionDecision":"deny"')
+    expect(out).toContain('$HOME')
   })
 })

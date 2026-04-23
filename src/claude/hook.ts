@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { stdin } from 'node:process'
 
-import { buildDenyMessage, findViolation } from '../parser.js'
+import { buildDenyMessage, findViolation, type Violation } from '../parser.js'
 
 const PLUGIN_NAME = 'gws-multi-account plugin'
 
@@ -21,13 +21,13 @@ function parsePayload(raw: string): Record<string, unknown> | null {
   }
 }
 
-function emitDeny(segment: string): void {
+function emitDeny(violation: Violation): void {
   process.stdout.write(
     `${JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
-        permissionDecisionReason: buildDenyMessage(segment, PLUGIN_NAME),
+        permissionDecisionReason: buildDenyMessage(violation, PLUGIN_NAME),
       },
     })}\n`,
   )
