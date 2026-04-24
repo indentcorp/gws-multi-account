@@ -1,6 +1,6 @@
 ---
 name: gws-multi-account
-description: 'Run the gws CLI (Google Workspace CLI) against multiple accounts stored under ~/.config/gws/<email>/, with metadata in ~/.config/gws/accounts.json. Always load this skill when executing any gws command so the right account is selected. Also handles migrating a legacy flat ~/.config/gws/ setup into the per-account layout.'
+description: 'Run the gws CLI (Google Workspace CLI) against multiple accounts stored under ~/.config/gws/<email>/, with metadata in ~/.config/gws/accounts.json. Always load this skill when executing any gws command so the right account is selected. Covers account selection, adding new accounts, migrating legacy flat ~/.config/gws/ setups, and the non-blocking `gws auth login` OAuth flow (background-spawn + poll; never run `gws auth login` in the foreground from an agent).'
 ---
 
 # gws — Multi-Account
@@ -87,6 +87,16 @@ set "GOOGLE_WORKSPACE_CLI_CONFIG_DIR=%USERPROFILE%\.config\gws\alice@example.com
 
 Works identically across every `gws` service (gmail, calendar, drive, sheets, docs, slides, tasks, people, chat, forms, etc.).
 
+## Logging in (OAuth flow)
+
+`gws auth login` is an **interactive OAuth2 flow** that starts a localhost callback server and blocks until the browser redirects back. Agent shells typically time out around 60 seconds; a foreground `gws auth login` will be killed mid-flow, the callback server dies with it, and the URL you already showed the user redirects to a dead port.
+
+**Rule: never run `gws auth login` in the foreground from an agent.** Background-spawn it, extract the OAuth URL from its log file, share the URL verbatim, and poll `gws auth status` for completion.
+
+The full six-step flow (with macOS / Linux + Windows PowerShell commands, troubleshooting table, and scope-flag reference) lives in [`references/auth-login.md`](./references/auth-login.md). Load it whenever the user asks to log in, re-authenticate, or when `gws auth status` shows `token_valid: false`.
+
+Triggers that should make you read the reference: "log into gws", "gws re-auth", "gmail login expired", "구글 로그인", "gws 재인증", `gws auth login`.
+
 ## Rules for agents
 
 - **Always set `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` explicitly.** Never rely on a shell default or an exported variable — the invocation must be self-contained.
@@ -104,13 +114,7 @@ When the user wants to register a new account:
 3. Create the account directory:
    - bash / zsh / Git Bash / WSL: `mkdir -p ~/.config/gws/<email>`
    - PowerShell: `New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.config\gws\<email>"`
-4. Run the `gws auth` login flow against that directory. If the user already has a `client_secret.json`, drop it into `~/.config/gws/<email>/client_secret.json` before running `gws auth login`.
-   ```bash
-   GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws/<email>" \
-     GOOGLE_WORKSPACE_CLI_CLIENT_ID=<client_id> \
-     GOOGLE_WORKSPACE_CLI_CLIENT_SECRET=<client_secret> \
-     gws auth login
-   ```
+4. Run the `gws auth` login flow against that directory. If the user already has a `client_secret.json`, drop it into `~/.config/gws/<email>/client_secret.json` first. **Do not run `gws auth login` in the foreground** — it starts a local OAuth callback server that dies when the agent's command timeout fires, stranding the user with a dead URL. Follow the background-spawn flow in [`references/auth-login.md`](./references/auth-login.md) instead.
 5. Append the account to `accounts.json` (preserve existing entries). Use Node for cross-platform JSON merging — no `jq` dependency. Node is guaranteed present on any machine running Claude Code or opencode.
    ```bash
    GWS_ACCOUNTS_JSON="$HOME/.config/gws/accounts.json" EMAIL=<email> DESC=<description> \
