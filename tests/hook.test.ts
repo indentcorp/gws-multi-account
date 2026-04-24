@@ -37,6 +37,19 @@ describe('parser.findViolation', () => {
   })
 
   test.each([
+    ['bare foreground', 'gws auth login'],
+    ['foreground with --full', 'gws auth login --full'],
+    ['env-prefixed foreground', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login'],
+    ['env + --readonly', 'env GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login --readonly'],
+    ['after cd', 'cd /tmp && GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login'],
+    ['with --scopes', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login --scopes a,b,c'],
+  ])('denies (foreground-auth-login): %s', (_label, cmd) => {
+    const v = findViolation(cmd)
+    expect(v).not.toBeNull()
+    expect(v!.kind).toBe('foreground-auth-login')
+  })
+
+  test.each([
     ['absolute path', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws gmail users getProfile'],
     ['quoted absolute path', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="/tmp/a" gws gmail users getProfile'],
     ['unquoted tilde (bash expands it)', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/a@b.com gws drive files list'],
@@ -48,6 +61,20 @@ describe('parser.findViolation', () => {
     ['gwsfoo', 'gwsfoo --help'],
     ['echo mentioning gws', 'echo run gws to test'],
     ['empty', ''],
+    [
+      'background auth login (nohup + redirect + &)',
+      'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a nohup gws auth login --full > /tmp/log 2>&1 &',
+    ],
+    ['background auth login (trailing &)', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login --full &'],
+    ['background auth login with disown', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login & disown'],
+    ['gws auth status', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth status'],
+    ['gws auth logout', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth logout'],
+    ['gws auth setup', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth setup'],
+    [
+      'file arg contains auth login',
+      'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files upload some-auth-login.pdf',
+    ],
+    ['subcommand with login in name', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth something-else-login'],
   ])('allows: %s', (_label, cmd) => {
     expect(findViolation(cmd)).toBeNull()
   })
@@ -79,6 +106,21 @@ describe('parser.buildDenyMessage', () => {
   test('literal-tilde: suggests $HOME fix', () => {
     expect(tilde).toContain('$HOME')
   })
+
+  const authLogin = buildDenyMessage({ kind: 'foreground-auth-login', segment: 'gws auth login --full' }, 'test-plugin')
+  test('foreground-auth-login: includes plugin name', () => {
+    expect(authLogin).toContain('test-plugin')
+  })
+  test('foreground-auth-login: mentions interactive OAuth', () => {
+    expect(authLogin.toLowerCase()).toContain('oauth')
+    expect(authLogin.toLowerCase()).toContain('timeout')
+  })
+  test('foreground-auth-login: points to skill reference', () => {
+    expect(authLogin).toContain('auth-login.md')
+  })
+  test('foreground-auth-login: suggests background spawn', () => {
+    expect(authLogin).toContain('nohup')
+  })
 })
 
 describe('opencode plugin entry', () => {
@@ -109,6 +151,26 @@ describe('opencode plugin entry', () => {
         { args: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~/.config/gws/a@b.com" gws drive files list' } },
       ),
     ).rejects.toThrow(/\$HOME/)
+  })
+
+  test('throws on foreground gws auth login even with env var set', async () => {
+    const hooks = await getHook()
+    await expect(
+      hooks['tool.execute.before']!(
+        { tool: 'bash', sessionID: 's', callID: 'c' },
+        { args: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login --full' } },
+      ),
+    ).rejects.toThrow(/OAuth/)
+  })
+
+  test('passes on backgrounded gws auth login', async () => {
+    const hooks = await getHook()
+    await expect(
+      hooks['tool.execute.before']!(
+        { tool: 'bash', sessionID: 's', callID: 'c' },
+        { args: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a nohup gws auth login --full > /tmp/log 2>&1 &' } },
+      ),
+    ).resolves.toBeUndefined()
   })
 
   test('passes on env-prefixed gws', async () => {
@@ -275,5 +337,32 @@ describe('claude code hook (smoke)', () => {
     const out = (result.stdout ?? '').trim()
     expect(out).toContain('"permissionDecision":"deny"')
     expect(out).toContain('$HOME')
+  })
+
+  test('denies foreground gws auth login with OAuth explanation', () => {
+    const result = spawnSync('node', [hookPath], {
+      input: JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login --full' },
+      }),
+      encoding: 'utf8',
+    })
+    const out = (result.stdout ?? '').trim()
+    expect(out).toContain('"permissionDecision":"deny"')
+    expect(out.toLowerCase()).toContain('oauth')
+    expect(out).toContain('auth-login.md')
+  })
+
+  test('allows backgrounded gws auth login', () => {
+    const result = spawnSync('node', [hookPath], {
+      input: JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: {
+          command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a nohup gws auth login --full > /tmp/log 2>&1 &',
+        },
+      }),
+      encoding: 'utf8',
+    })
+    expect((result.stdout ?? '').trim()).toBe('')
   })
 })

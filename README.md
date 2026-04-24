@@ -11,6 +11,8 @@ Both plugins share the same `parser.ts` and the same `SKILL.md`. One source tree
 
 The `gws` CLI reads `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` to pick an account. If your agent forgets to set it, `gws` writes to the default account — often the wrong one. This package enforces the env var on every invocation: every `gws` call an agent runs must be prefixed with `GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<email>` (resolves to `%USERPROFILE%\.config\gws\<email>` on Windows), or the call is blocked with an explanatory message the agent can act on.
 
+It also blocks a second footgun: **foreground `gws auth login`**. That command starts an interactive OAuth callback server and blocks until a browser redirect completes; the agent shell's ~60s command timeout kills it mid-flow and leaves the user with a dead URL. The hook catches this and points the agent at the background-spawn flow in [`references/auth-login.md`](./skills/gws-multi-account/references/auth-login.md). Legitimate background spawns (`... gws auth login ... &` or `nohup gws auth login ... &`) pass through unchanged.
+
 See [`skills/gws-multi-account/SKILL.md`](./skills/gws-multi-account/SKILL.md) for the full layout contract.
 
 ## Install
@@ -49,9 +51,10 @@ Both plugins funnel every Bash-style command through the same enforcement functi
 1. **Intercept the command.** On Claude Code, `hooks/hooks.json` registers `hook.js` as a `PreToolUse` hook matching the `Bash` tool; the hook receives the tool payload on stdin. On opencode, `plugin.ts` registers a `tool.execute.before` callback that fires for the `bash` tool with the resolved command args. Non-Bash tools and empty commands short-circuit immediately.
 2. **Split into segments.** `parser.ts` splits the command on shell control operators (`;`, `&&`, `||`, `|`, `&`) and evaluates each segment independently. This is why `cd foo && gws …` requires the env var on the `gws` segment — the `cd` segment is irrelevant.
 3. **Find the real command word.** Within a segment, the parser walks past transparent prefixes: `NAME=VALUE` assignments and the `env` builtin. The first bare word is the actual command. If it isn't `gws` (word-boundary match, so `my_gws_wrapper` and `gwsfoo` don't trigger), the segment passes.
-4. **Check for the env var.** If any prefix assignment sets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR`, the segment passes. Otherwise it's a violation.
-5. **Block with an actionable message.** Claude's hook writes a `PreToolUse` deny JSON to stdout (`permissionDecision: "deny"`) with the exact offending segment and a fix hint. opencode's hook throws with the same message, which opencode surfaces to the agent. Both messages point at `~/.config/gws/accounts.json` so the agent can pick the right account and retry.
-6. **Fail open on crash.** If the parser itself throws, the Claude hook logs to stderr and exits 0 rather than bricking the user's Bash. The opencode hook inherits opencode's error surface but never swallows the user's command silently.
+4. **Check for foreground `gws auth login`.** If the next two non-flag positional args are `auth` then `login`, and the segment was not backgrounded (trailing `&` at the original split point), it's a violation regardless of whether the env var is set — the env var doesn't help when the real problem is the interactive callback server getting killed by the agent's command timeout. `gws auth status`, `gws auth logout`, `gws auth setup`, and background-spawned `gws auth login ... &` all pass.
+5. **Check for the env var.** If any prefix assignment sets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR`, the segment passes. Otherwise it's a violation.
+6. **Block with an actionable message.** Claude's hook writes a `PreToolUse` deny JSON to stdout (`permissionDecision: "deny"`) with the exact offending segment and a fix hint. opencode's hook throws with the same message, which opencode surfaces to the agent. Both messages point at `~/.config/gws/accounts.json` so the agent can pick the right account and retry; the auth-login message additionally points at the skill's background-spawn reference.
+7. **Fail open on crash.** If the parser itself throws, the Claude hook logs to stderr and exits 0 rather than bricking the user's Bash. The opencode hook inherits opencode's error surface but never swallows the user's command silently.
 
 On opencode startup there's a second, independent flow: the plugin resolves its bundled `skills/` directory (`../../skills` relative to `dist/opencode/plugin.js`) and appends it to `skills.paths` in the first writable `opencode.json` / `opencode.jsonc` it finds (project, then `~/.config/opencode/`). Writes are atomic (temp file + rename) and idempotent. If the target is `.jsonc` with real JSONC features (comments, trailing commas), the plugin refuses to rewrite it and prints the path for manual editing — round-tripping through `JSON.parse` / `JSON.stringify` would silently strip those features. Set `OPENCODE_GWS_SKIP_SKILL_REGISTRATION=1` to disable this step.
 
@@ -67,7 +70,9 @@ On opencode startup there's a second, independent flow: the plugin resolves its 
 │   └── hooks.json
 ├── skills/
 │   └── gws-multi-account/
-│       └── SKILL.md          Canonical skill, shipped to both hosts
+│       ├── SKILL.md          Canonical skill, shipped to both hosts
+│       └── references/
+│           └── auth-login.md OAuth background-spawn flow
 ├── src/
 │   ├── parser.ts             Shared enforcement logic (findViolation, buildDenyMessage)
 │   ├── claude/
@@ -76,7 +81,7 @@ On opencode startup there's a second, independent flow: the plugin resolves its 
 │       ├── plugin.ts         opencode plugin entry (tool.execute.before hook)
 │       └── skill-registration.ts
 ├── tests/
-│   └── hook.test.ts          bun test — 31 assertions across parser, entries, registration
+│   └── hook.test.ts          bun test — parser, entries, registration, auth-login detection
 ├── build.ts                  One script, two targets (dist/opencode + hooks/)
 ├── package.json              Published to npm as opencode-gws-multi-account
 ├── tsconfig.json
@@ -89,7 +94,7 @@ On opencode startup there's a second, independent flow: the plugin resolves its 
 ```bash
 bun install
 bun run build       # produces dist/opencode/plugin.js and hooks/hook.js
-bun run test        # 31 assertions
+bun run test
 bun run typecheck
 bun run lint
 bun run format      # writes
@@ -106,8 +111,10 @@ After editing `src/`, run `bun run build` before committing so `hooks/hook.js` s
 ## Design notes
 
 - **Per-segment parsing** — commands split on `;`, `&&`, `||`, `|`, `&` so `cd foo && gws …` is evaluated as two segments; the env-var must live on the `gws` segment.
-- **Transparent prefixes** — `NAME=VALUE` assignments and the `env` builtin are walked over to find the real command word.
+- **Background-aware split** — the split preserves which separator produced each segment, so a segment terminated by a bare `&` is marked backgrounded. The `gws auth login` check skips backgrounded segments; the env-var check does not (forgetting the env var is wrong in any mode).
+- **Transparent prefixes** — `NAME=VALUE` assignments and the `env` builtin are walked over to find the real command word. Wrappers like `nohup`, `setsid`, and `timeout` are **not** walked — they become the command word, so the `gws auth login` check naturally skips them (wrapping in `nohup` is exactly how you background-spawn).
 - **Word boundaries** — `gws` must be a standalone word (regex `(^|\s|=)gws(\s|$)`); `my_gws_wrapper` and `gwsfoo` don't trigger.
+- **Positional-arg matching** — the `gws auth login` check walks positional args (skipping flags) instead of substring-matching, so a file argument like `some-auth-login.pdf` or an unrelated subcommand like `gws auth something-else-login` never trips it.
 - **Fail open on crash** — a parser exception logs to stderr and exits 0 rather than blocking the user's Bash.
 - **JSONC-safe config writes** — when the opencode plugin detects comments or trailing commas in `opencode.jsonc`, it refuses to rewrite the file and prints the path for the user to paste manually.
 
