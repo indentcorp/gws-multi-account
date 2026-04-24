@@ -9,7 +9,35 @@ Both plugins share the same `parser.ts` and the same `SKILL.md`. One source tree
 
 ## Why
 
-The `gws` CLI reads `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` to pick an account. If your agent forgets to set it, `gws` writes to the default account — often the wrong one. This package enforces the env var on every invocation: every `gws` call an agent runs must be prefixed with `GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<email>` (resolves to `%USERPROFILE%\.config\gws\<email>` on Windows), or the call is blocked with an explanatory message the agent can act on.
+The `gws` CLI reads `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` to pick which account's credentials to use. The simplest way to juggle multiple accounts is to put each account's credentials in its own subdirectory and point the env var at the right one:
+
+```bash
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/personal@gmail.com gws auth login
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/work@company.com  gws auth login
+```
+
+That gives you a per-account layout:
+
+```
+~/.config/gws/
+├── personal@gmail.com/
+│   ├── client_secret.json
+│   ├── credentials.enc
+│   └── token_cache.json
+└── work@company.com/
+    ├── client_secret.json
+    ├── credentials.enc
+    └── token_cache.json
+```
+
+And from then on, every call names its account explicitly:
+
+```bash
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/personal@gmail.com gws gmail ...
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/work@company.com  gws gmail ...
+```
+
+This works — but it's easy for an agent to forget the prefix, and when it does, `gws` silently falls back to the default account and writes to the wrong inbox / calendar / drive. This package is the guardrail: a hook that inspects every `gws` invocation and **blocks any call missing the env var** with an explanatory message the agent can act on. The layout above becomes a contract; the agent picks the account from `~/.config/gws/accounts.json` and the hook makes sure it actually did.
 
 It also blocks a second footgun: **foreground `gws auth login`**. That command starts an interactive OAuth callback server and blocks until a browser redirect completes; the agent shell's ~60s command timeout kills it mid-flow and leaves the user with a dead URL. The hook catches this and points the agent at the background-spawn flow in [`references/auth-login.md`](./skills/gws-multi-account/references/auth-login.md). Legitimate background spawns (`... gws auth login ... &` or `nohup gws auth login ... &`) pass through unchanged.
 
