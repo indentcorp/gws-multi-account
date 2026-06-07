@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { stdin } from 'node:process'
 
-import { buildDenyMessage, findViolation, type Violation } from '../parser.js'
+import { buildDenyMessage, findViolation, type Violation } from '@gws-multi-account/core'
 
 const PLUGIN_NAME = 'gws-multi-account plugin'
 

@@ -1,10 +1,16 @@
 # gws-multi-account
 
-Multi-account management for the Google Workspace CLI (`gws`). Ships an opencode plugin (published to npm as `opencode-gws-multi-account`) and a Claude Code plugin (installed via the bundled `.claude-plugin` marketplace).
+Multi-account management for the Google Workspace CLI (`gws`). A Bun-workspace monorepo shipping three plugin targets from one shared core (`packages/core`, private):
+
+- `packages/opencode` → npm `opencode-gws-multi-account` (opencode plugin)
+- `packages/typeclaw` → npm `typeclaw-gws-multi-account` (TypeClaw plugin)
+- root `.claude-plugin/` + committed `hooks/hook.js` → Claude Code marketplace plugin (git clone)
+
+All three share `packages/core/src/parser.ts` and the canonical root `skills/gws-multi-account/SKILL.md` (committed at root; `build.ts` copies it into each npm package).
 
 ## Release
 
-Use the **Release** GitHub Actions workflow (`workflow_dispatch`). It lints, format-checks, typechecks, tests, bumps version in `package.json` / `.claude-plugin/plugin.json`, rebuilds `hooks/hook.js` so the committed artifact matches, commits, tags, publishes to npm, and creates a GitHub Release. Tags have no `v` prefix.
+Use the **Release** GitHub Actions workflow (`workflow_dispatch`). It lints, format-checks, typechecks, tests, bumps the **same** version across the root `package.json`, all `packages/*/package.json`, and `.claude-plugin/plugin.json`, rebuilds so `hooks/hook.js` and the package dists match, commits, tags, publishes **both** npm packages (opencode + typeclaw; core stays private), and creates a GitHub Release. Tags have no `v` prefix.
 
 ### Version Decision
 

@@ -3,7 +3,7 @@
 // src/claude/hook.ts
 import { stdin } from "node:process";
 
-// src/parser.ts
+// packages/core/src/parser.ts
 var ENV_VAR = "GOOGLE_WORKSPACE_CLI_CONFIG_DIR";
 var ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 var GWS_WORD = /(^|[\s=])gws(\s|$)/;

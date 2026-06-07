@@ -3,11 +3,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Published layout: dist/opencode/plugin.js → ../../skills relative to the
-// running module resolves to the package's bundled `skills/` directory.
+// Published layout: dist/plugin.js → ../skills resolves to the package's
+// bundled `skills/` directory (copied from the repo root at build time).
 export async function resolveBundledSkillsDir(): Promise<string | null> {
   const here = path.dirname(fileURLToPath(import.meta.url))
-  const candidate = path.resolve(here, '..', '..', 'skills')
+  const candidate = path.resolve(here, '..', 'skills')
   try {
     const stat = await fs.stat(candidate)
     return stat.isDirectory() ? candidate : null

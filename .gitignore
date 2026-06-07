@@ -2,10 +2,15 @@ node_modules/
 *.tsbuildinfo
 
 # Build outputs:
-#   dist/   — opencode plugin build (loaded from node_modules by opencode users)
+#   packages/*/dist    — npm plugin builds (opencode, typeclaw)
+#   packages/*/skills  — per-package copies of the canonical root skills/
 # NOT ignored: hooks/*.js is the pre-built Claude Code hook, COMMITTED because
 # Claude Code's marketplace install clones from GitHub and cannot run `bun build`.
-dist/
+# The canonical skills/ at the repo root stays COMMITTED (Claude clones it).
+packages/*/dist/
+packages/*/skills/
+packages/*/README.md
+packages/*/LICENSE
 
 # OS / editor artifacts
 .DS_Store

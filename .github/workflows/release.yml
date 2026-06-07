@@ -46,33 +46,44 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Bump version
+      - name: Bump version across all manifests
         run: |
-          npm version ${{ inputs.version }} --no-git-tag-version --allow-same-version
           bun -e "
             const fs = require('fs');
             const v = '${{ inputs.version }}';
-            for (const f of ['.claude-plugin/plugin.json']) {
+            const files = [
+              'package.json',
+              'packages/core/package.json',
+              'packages/opencode/package.json',
+              'packages/typeclaw/package.json',
+              '.claude-plugin/plugin.json',
+            ];
+            for (const f of files) {
               const c = JSON.parse(fs.readFileSync(f, 'utf8'));
               c.version = v;
               fs.writeFileSync(f, JSON.stringify(c, null, 2) + '\n');
             }
           "
 
-      - name: Rebuild hooks so the committed artifact matches the bumped version
+      - name: Rebuild so committed hooks/ and package dists match the bumped version
         run: bun run build
 
       - name: Commit and tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json .claude-plugin/plugin.json hooks/
+          git add package.json packages/*/package.json .claude-plugin/plugin.json hooks/
           git diff --staged --quiet || git commit -m "${{ inputs.version }}"
           git tag "${{ inputs.version }}"
           git push origin HEAD --tags
 
-      - name: Publish to npm
-        run: npm publish --provenance --access public
+      - name: Publish opencode plugin to npm
+        run: npm publish --provenance --access public -w packages/opencode
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish typeclaw plugin to npm
+        run: npm publish --provenance --access public -w packages/typeclaw
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

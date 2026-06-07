@@ -6,9 +6,10 @@ import path from 'node:path'
 
 process.env.OPENCODE_GWS_SKIP_SKILL_REGISTRATION = '1'
 
-const { findViolation, buildDenyMessage } = await import('../src/parser.js')
-const { registerSkillPath, configPathCandidates } = await import('../src/opencode/skill-registration.js')
-const opencodeModule = await import('../src/opencode/plugin.js')
+const { findViolation, buildDenyMessage } = await import('@gws-multi-account/core')
+const { registerSkillPath, configPathCandidates } = await import('../packages/opencode/src/skill-registration.js')
+const opencodeModule = await import('../packages/opencode/src/plugin.js')
+const typeclawModule = await import('../packages/typeclaw/src/plugin.js')
 
 describe('parser.findViolation', () => {
   test.each([
@@ -195,6 +196,99 @@ describe('opencode plugin entry', () => {
     await expect(
       hooks['tool.execute.before']!({ tool: 'bash', sessionID: 's', callID: 'c' }, { args: {} }),
     ).resolves.toBeUndefined()
+  })
+})
+
+describe('typeclaw plugin entry', () => {
+  const { evaluateToolBefore } = typeclawModule
+  const def = typeclawModule.default
+
+  test('default export is a definePlugin envelope', () => {
+    expect(def.name).toBe('gws-multi-account')
+    expect(Array.isArray(def.permissions)).toBe(true)
+    expect(typeof def.factory).toBe('function')
+  })
+
+  test('factory contributes a tool.before hook and the bundled skill', async () => {
+    const contrib = await def.factory()
+    expect(typeof contrib.hooks?.['tool.before']).toBe('function')
+    expect(contrib.skills?.[0]?.name).toBe('gws-multi-account')
+    expect(contrib.skills?.[0]?.content?.length ?? 0).toBeGreaterThan(0)
+  })
+
+  test('denies bare gws with reason', () => {
+    const r = evaluateToolBefore({ tool: 'bash', input: { command: 'gws drive files list' } })
+    expect(r.ok).toBe(false)
+    expect((r as { reason: string }).reason).toContain('typeclaw gws-multi-account plugin')
+  })
+
+  test('denies quoted literal tilde with $HOME hint', () => {
+    const r = evaluateToolBefore({
+      tool: 'bash',
+      input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~/.config/gws/a@b.com" gws drive files list' },
+    })
+    expect(r.ok).toBe(false)
+    expect((r as { reason: string }).reason).toContain('$HOME')
+  })
+
+  test('denies foreground gws auth login even with env var set', () => {
+    const r = evaluateToolBefore({
+      tool: 'bash',
+      input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login --full' },
+    })
+    expect(r.ok).toBe(false)
+    expect((r as { reason: string }).reason.toLowerCase()).toContain('oauth')
+  })
+
+  test('allows backgrounded gws auth login', () => {
+    expect(
+      evaluateToolBefore({
+        tool: 'bash',
+        input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a nohup gws auth login --full > /tmp/log 2>&1 &' },
+      }),
+    ).toEqual({ ok: true })
+  })
+
+  test('allows env-prefixed gws', () => {
+    expect(
+      evaluateToolBefore({
+        tool: 'bash',
+        input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files list' },
+      }),
+    ).toEqual({ ok: true })
+  })
+
+  test('ignores non-bash tools', () => {
+    expect(evaluateToolBefore({ tool: 'read', input: { command: 'gws x' } })).toEqual({ ok: true })
+  })
+
+  test('ignores empty command', () => {
+    expect(evaluateToolBefore({ tool: 'bash', input: {} })).toEqual({ ok: true })
+  })
+})
+
+describe('published package manifests', () => {
+  const opencodePkg = require('../packages/opencode/package.json') as {
+    name: string
+    main: string
+    files: string[]
+  }
+  const typeclawPkg = require('../packages/typeclaw/package.json') as {
+    name: string
+    main: string
+    files: string[]
+  }
+
+  test('opencode package name and entry', () => {
+    expect(opencodePkg.name).toBe('opencode-gws-multi-account')
+    expect(opencodePkg.main).toBe('./dist/plugin.js')
+    expect(opencodePkg.files).toContain('skills')
+  })
+
+  test('typeclaw package name and entry', () => {
+    expect(typeclawPkg.name).toBe('typeclaw-gws-multi-account')
+    expect(typeclawPkg.main).toBe('./dist/plugin.js')
+    expect(typeclawPkg.files).toContain('skills')
   })
 })
 

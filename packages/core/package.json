@@ -1,0 +1,13 @@
+{
+  "name": "@gws-multi-account/core",
+  "version": "0.3.2",
+  "description": "Shared gws-multi-account enforcement logic (findViolation, buildDenyMessage). Internal workspace package, not published.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/parser.ts",
+  "types": "./src/parser.ts",
+  "exports": {
+    ".": "./src/parser.ts"
+  }
+}
