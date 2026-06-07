@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process'
 import { cp, rm } from 'node:fs/promises'
 
 const claudeBuild = await Bun.build({
-  entrypoints: ['src/claude/hook.ts'],
+  entrypoints: ['packages/claude/src/hook.ts'],
   outdir: 'hooks',
   target: 'node',
   format: 'esm',

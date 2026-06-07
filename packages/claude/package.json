@@ -1,0 +1,11 @@
+{
+  "name": "@gws-multi-account/claude",
+  "version": "0.3.2",
+  "description": "Claude Code PreToolUse hook entry. Built to the repo-root hooks/ for the .claude-plugin marketplace (git clone). Internal workspace package, not published.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "devDependencies": {
+    "@gws-multi-account/core": "workspace:*"
+  }
+}

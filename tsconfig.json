@@ -6,5 +6,5 @@
       "@gws-multi-account/core": ["./packages/core/src/parser.ts"]
     }
   },
-  "include": ["src/**/*.ts", "packages/*/src/**/*.ts", "build.ts", "tests/**/*.ts"]
+  "include": ["packages/*/src/**/*.ts", "build.ts", "tests/**/*.ts"]
 }

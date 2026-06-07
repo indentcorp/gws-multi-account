@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// src/claude/hook.ts
+// packages/claude/src/hook.ts
 import { stdin } from "node:process";
 
 // packages/core/src/parser.ts
@@ -84,7 +84,7 @@ function isAuthLoginCall(tokens, cmdIndex) {
   return positional[0] === "auth" && positional[1] === "login";
 }
 
-// src/claude/hook.ts
+// packages/claude/src/hook.ts
 var PLUGIN_NAME = "gws-multi-account plugin";
 async function readStdin() {
   const chunks = [];

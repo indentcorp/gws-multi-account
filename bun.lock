@@ -13,6 +13,13 @@
         "typescript": "^5.9.3",
       },
     },
+    "packages/claude": {
+      "name": "@gws-multi-account/claude",
+      "version": "0.3.2",
+      "devDependencies": {
+        "@gws-multi-account/core": "workspace:*",
+      },
+    },
     "packages/core": {
       "name": "@gws-multi-account/core",
       "version": "0.3.2",
@@ -36,6 +43,8 @@
     },
   },
   "packages": {
+    "@gws-multi-account/claude": ["@gws-multi-account/claude@workspace:packages/claude"],
+
     "@gws-multi-account/core": ["@gws-multi-account/core@workspace:packages/core"],
 
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3", "", { "os": "darwin", "cpu": "arm64" }, "sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw=="],

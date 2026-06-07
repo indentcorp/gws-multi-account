@@ -107,19 +107,18 @@ On opencode startup there's a second, independent flow: the plugin resolves its 
 │   ├── marketplace.json
 │   └── plugin.json
 ├── hooks/                    Pre-built Claude hook (committed; marketplace clones from GitHub)
-│   ├── hook.js               Built output of src/claude/hook.ts
-│   └── hooks.json
+│   ├── hook.js               Built output of packages/claude/src/hook.ts
+│   └── hooks.json            References ${CLAUDE_PLUGIN_ROOT}/hooks/hook.js — stays at root
 ├── skills/                   Canonical skill — COMMITTED at root (Claude clones it; build
 │   └── gws-multi-account/    copies it into each npm package)
 │       ├── SKILL.md
 │       └── references/
 │           └── auth-login.md OAuth background-spawn flow
-├── src/
-│   └── claude/
-│       └── hook.ts           Claude Code PreToolUse entry (stdin/stdout deny JSON)
 ├── packages/
 │   ├── core/                 @gws-multi-account/core — shared, private (not published)
 │   │   └── src/parser.ts     Enforcement logic (findViolation, buildDenyMessage)
+│   ├── claude/               @gws-multi-account/claude — private (built to root hooks/)
+│   │   └── src/hook.ts       Claude Code PreToolUse entry (stdin/stdout deny JSON)
 │   ├── opencode/             opencode-gws-multi-account (npm)
 │   │   └── src/
 │   │       ├── plugin.ts     opencode plugin entry (tool.execute.before hook)
@@ -155,7 +154,7 @@ bun run format:check
 - **`skills/`** at the repo root is **committed** — it's the canonical skill source and Claude's marketplace clones it directly.
 - **`packages/*/dist/`**, the per-package **`skills/`** copies, and per-package **`README.md`/`LICENSE`** are **gitignored** build artifacts. The two npm packages (`opencode-gws-multi-account`, `typeclaw-gws-multi-account`) install from npm; `@gws-multi-account/core` is private and bundled inline at build time, so it is never published.
 
-After editing any `src/` or `packages/*/src/`, run `bun run build` before committing so `hooks/hook.js` stays in sync. CI runs the full pipeline on every push/PR (`bun run lint`, `format:check`, `typecheck`, `test`) and then verifies no drift via `git diff --exit-code hooks/` — so if you forget to rebuild, the check fails with a clear message.
+After editing any `packages/*/src/`, run `bun run build` before committing so `hooks/hook.js` stays in sync. CI runs the full pipeline on every push/PR (`bun run lint`, `format:check`, `typecheck`, `test`) and then verifies no drift via `git diff --exit-code hooks/` — so if you forget to rebuild, the check fails with a clear message.
 
 ## Design notes
 
