@@ -35,16 +35,16 @@ jobs:
       - name: Test (also rebuilds via `test` script)
         run: bun run test
 
-      # Drift guard: if src/ changed without hooks/hook.js being rebuilt, the
-      # freshly-built file will differ from what was committed. `git diff
-      # --exit-code` returns non-zero when there are changes, which fails the
-      # job and points the contributor at the missing build step.
+      # Drift guard: if packages/*/src/ changed without hooks/hook.js being
+      # rebuilt, the freshly-built file will differ from what was committed.
+      # `git diff --exit-code` returns non-zero when there are changes, which
+      # fails the job and points the contributor at the missing build step.
       #
       # Linux-only: on Windows, git's default autocrlf would false-positive
       # the check from CRLF normalization, not a real build-output mismatch.
-      - name: Check hooks/hook.js is in sync with src/
+      - name: Check hooks/hook.js is in sync with packages/claude/src
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           git diff --exit-code hooks/ \
-            || (echo "::error::hooks/hook.js is out of sync with src/. Run 'bun run build' and commit the updated file."; exit 1)
+            || (echo "::error::hooks/hook.js is out of sync with packages/claude/src. Run 'bun run build' and commit the updated file."; exit 1)
