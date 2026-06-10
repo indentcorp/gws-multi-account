@@ -76,7 +76,7 @@ Add the package to `plugins[]` in your `typeclaw.json`:
 }
 ```
 
-The plugin's `factory` contributes a `tool.before` hook (same enforcement as the other two hosts) and the bundled `gws-multi-account` skill. Restart the agent to load it.
+The plugin's `plugin` factory contributes a `tool.before` hook (same enforcement as the other two hosts) and the bundled `gws-multi-account` skill via `skillsDirs`. Restart the agent to load it.
 
 ## Platform support
 
@@ -89,7 +89,7 @@ CI runs the full pipeline on Ubuntu, macOS, and Windows.
 
 All three plugins funnel every Bash-style command through the same enforcement function (`packages/core`) before the agent is allowed to run it.
 
-1. **Intercept the command.** On Claude Code, `hooks/hooks.json` registers `hook.js` as a `PreToolUse` hook matching the `Bash` tool; the hook receives the tool payload on stdin. On opencode, `plugin.ts` registers a `tool.execute.before` callback that fires for the `bash` tool with the resolved command args. On TypeClaw, the plugin's `factory` contributes a `tool.before` hook that gates the built-in `bash` tool and returns `{ ok: false, reason }` to block. Non-Bash tools and empty commands short-circuit immediately.
+1. **Intercept the command.** On Claude Code, `hooks/hooks.json` registers `hook.js` as a `PreToolUse` hook matching the `Bash` tool; the hook receives the tool payload on stdin. On opencode, `plugin.ts` registers a `tool.execute.before` callback that fires for the `bash` tool with the resolved command args. On TypeClaw, the plugin's `plugin` factory contributes a `tool.before` hook that gates the built-in `bash` tool and returns `{ block: true, reason }` to block. Non-Bash tools and empty commands short-circuit immediately.
 2. **Split into segments.** `parser.ts` splits the command on shell control operators (`;`, `&&`, `||`, `|`, `&`) and evaluates each segment independently. This is why `cd foo && gws …` requires the env var on the `gws` segment — the `cd` segment is irrelevant.
 3. **Find the real command word.** Within a segment, the parser walks past transparent prefixes: `NAME=VALUE` assignments and the `env` builtin. The first bare word is the actual command. If it isn't `gws` (word-boundary match, so `my_gws_wrapper` and `gwsfoo` don't trigger), the segment passes.
 4. **Check for foreground `gws auth login`.** If the next two non-flag positional args are `auth` then `login`, and the segment was not backgrounded (trailing `&` at the original split point), it's a violation regardless of whether the env var is set — the env var doesn't help when the real problem is the interactive callback server getting killed by the agent's command timeout. `gws auth status`, `gws auth logout`, `gws auth setup`, and background-spawned `gws auth login ... &` all pass.
