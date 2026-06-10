@@ -204,39 +204,39 @@ describe('typeclaw plugin entry', () => {
   const def = typeclawModule.default
 
   test('default export is a definePlugin envelope', () => {
-    expect(def.name).toBe('gws-multi-account')
     expect(Array.isArray(def.permissions)).toBe(true)
-    expect(typeof def.factory).toBe('function')
+    expect(typeof def.plugin).toBe('function')
   })
 
-  test('factory contributes a tool.before hook and the bundled skill', async () => {
-    const contrib = await def.factory()
+  test('plugin factory contributes a tool.before hook and the bundled skills dir', async () => {
+    const contrib = await def.plugin()
     expect(typeof contrib.hooks?.['tool.before']).toBe('function')
-    expect(contrib.skills?.[0]?.name).toBe('gws-multi-account')
-    expect(contrib.skills?.[0]?.content?.length ?? 0).toBeGreaterThan(0)
+    const dirs = contrib.skillsDirs ?? []
+    expect(dirs.length).toBe(1)
+    expect(dirs[0]).toContain(path.join('skills', 'gws-multi-account'))
   })
 
   test('denies bare gws with reason', () => {
-    const r = evaluateToolBefore({ tool: 'bash', input: { command: 'gws drive files list' } })
-    expect(r.ok).toBe(false)
+    const r = evaluateToolBefore({ tool: 'bash', args: { command: 'gws drive files list' } })
+    expect((r as { block: boolean }).block).toBe(true)
     expect((r as { reason: string }).reason).toContain('typeclaw gws-multi-account plugin')
   })
 
   test('denies quoted literal tilde with $HOME hint', () => {
     const r = evaluateToolBefore({
       tool: 'bash',
-      input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~/.config/gws/a@b.com" gws drive files list' },
+      args: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~/.config/gws/a@b.com" gws drive files list' },
     })
-    expect(r.ok).toBe(false)
+    expect((r as { block: boolean }).block).toBe(true)
     expect((r as { reason: string }).reason).toContain('$HOME')
   })
 
   test('denies foreground gws auth login even with env var set', () => {
     const r = evaluateToolBefore({
       tool: 'bash',
-      input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login --full' },
+      args: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login --full' },
     })
-    expect(r.ok).toBe(false)
+    expect((r as { block: boolean }).block).toBe(true)
     expect((r as { reason: string }).reason.toLowerCase()).toContain('oauth')
   })
 
@@ -244,26 +244,26 @@ describe('typeclaw plugin entry', () => {
     expect(
       evaluateToolBefore({
         tool: 'bash',
-        input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a nohup gws auth login --full > /tmp/log 2>&1 &' },
+        args: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a nohup gws auth login --full > /tmp/log 2>&1 &' },
       }),
-    ).toEqual({ ok: true })
+    ).toBeUndefined()
   })
 
   test('allows env-prefixed gws', () => {
     expect(
       evaluateToolBefore({
         tool: 'bash',
-        input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files list' },
+        args: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files list' },
       }),
-    ).toEqual({ ok: true })
+    ).toBeUndefined()
   })
 
   test('ignores non-bash tools', () => {
-    expect(evaluateToolBefore({ tool: 'read', input: { command: 'gws x' } })).toEqual({ ok: true })
+    expect(evaluateToolBefore({ tool: 'read', args: { command: 'gws x' } })).toBeUndefined()
   })
 
   test('ignores empty command', () => {
-    expect(evaluateToolBefore({ tool: 'bash', input: {} })).toEqual({ ok: true })
+    expect(evaluateToolBefore({ tool: 'bash', args: {} })).toBeUndefined()
   })
 })
 
