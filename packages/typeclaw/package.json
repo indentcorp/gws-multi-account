@@ -1,6 +1,6 @@
 {
   "name": "typeclaw-gws-multi-account",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Multi-account management for the Google Workspace CLI (`gws`). TypeClaw plugin: a `tool.before` hook and a contributed skill.",
   "keywords": [
     "google-workspace",

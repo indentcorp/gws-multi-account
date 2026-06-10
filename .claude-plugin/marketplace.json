@@ -10,7 +10,7 @@
     {
       "name": "gws-multi-account",
       "description": "Enforces the gws-multi-account layout: blocks bare `gws` CLI commands that do not set GOOGLE_WORKSPACE_CLI_CONFIG_DIR, and ships the matching skill so Claude picks the right account automatically.",
-      "version": "0.1.0",
+      "version": "0.3.3",
       "author": {
         "name": "Jeon Suyeol",
         "url": "https://github.com/devxoul"
@@ -18,7 +18,12 @@
       "source": "./",
       "category": "productivity",
       "homepage": "https://github.com/indentcorp/gws-multi-account",
-      "keywords": ["gws", "google-workspace", "hooks", "multi-account"]
+      "keywords": [
+        "gws",
+        "google-workspace",
+        "hooks",
+        "multi-account"
+      ]
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "name": "@gws-multi-account/core",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Shared gws-multi-account enforcement logic (findViolation, buildDenyMessage). Internal workspace package, not published.",
   "private": true,
   "license": "MIT",
