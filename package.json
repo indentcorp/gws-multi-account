@@ -1,6 +1,6 @@
 {
   "name": "gws-multi-account-monorepo",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Multi-account management for the Google Workspace CLI (`gws`). Monorepo shipping opencode + TypeClaw npm plugins and a root Claude Code marketplace plugin.",
   "private": true,
   "homepage": "https://github.com/indentcorp/gws-multi-account",

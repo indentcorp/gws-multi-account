@@ -10,7 +10,7 @@
     {
       "name": "gws-multi-account",
       "description": "Enforces the gws-multi-account layout: blocks bare `gws` CLI commands that do not set GOOGLE_WORKSPACE_CLI_CONFIG_DIR, and ships the matching skill so Claude picks the right account automatically.",
-      "version": "0.3.3",
+      "version": "0.3.4",
       "author": {
         "name": "Jeon Suyeol",
         "url": "https://github.com/devxoul"
