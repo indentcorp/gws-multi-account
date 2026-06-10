@@ -6,6 +6,10 @@ on:
       version:
         description: 'Version (x.y.z)'
         required: true
+      target:
+        description: 'Publish target: all, opencode, or typeclaw'
+        required: false
+        default: 'all'
 
 permissions:
   contents: write
@@ -47,6 +51,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Bump version across all manifests
+        if: ${{ inputs.target == 'all' }}
         run: |
           bun -e "
             const fs = require('fs');
@@ -71,28 +76,57 @@ jobs:
           "
 
       - name: Rebuild so committed hooks/ and package dists match the bumped version
+        if: ${{ inputs.target == 'all' }}
         run: bun run build
 
+      - name: Verify partial publish version
+        if: ${{ inputs.target != 'all' }}
+        run: |
+          bun -e "
+            const fs = require('fs');
+            const v = '${{ inputs.version }}';
+            const files = [
+              'package.json',
+              'packages/core/package.json',
+              'packages/claude/package.json',
+              'packages/opencode/package.json',
+              'packages/typeclaw/package.json',
+              '.claude-plugin/plugin.json',
+            ];
+            for (const f of files) {
+              const c = JSON.parse(fs.readFileSync(f, 'utf8'));
+              if (c.version !== v) throw new Error(`${f} is ${c.version}, expected ${v}`);
+            }
+            const mp = JSON.parse(fs.readFileSync('.claude-plugin/marketplace.json', 'utf8'));
+            for (const p of mp.plugins ?? []) {
+              if (p.version !== v) throw new Error(`marketplace plugin ${p.name ?? '<unknown>'} is ${p.version}, expected ${v}`);
+            }
+          "
+
       - name: Commit and tag
+        if: ${{ inputs.target == 'all' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add package.json packages/*/package.json .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/
           git diff --staged --quiet || git commit -m "${{ inputs.version }}"
-          git tag "${{ inputs.version }}"
+          git rev-parse "${{ inputs.version }}" >/dev/null 2>&1 || git tag "${{ inputs.version }}"
           git push origin HEAD --tags
 
       - name: Publish opencode plugin to npm
+        if: ${{ inputs.target == 'all' || inputs.target == 'opencode' }}
         run: npm publish --provenance --access public -w packages/opencode
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish typeclaw plugin to npm
+        if: ${{ inputs.target == 'all' || inputs.target == 'typeclaw' }}
         run: npm publish --provenance --access public -w packages/typeclaw
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
-        run: gh release create "${{ inputs.version }}" --generate-notes
+        if: ${{ inputs.target == 'all' || inputs.target == 'typeclaw' }}
+        run: gh release view "${{ inputs.version }}" >/dev/null 2>&1 || gh release create "${{ inputs.version }}" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
