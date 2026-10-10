@@ -1,13 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import fs from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 
-process.env.OPENCODE_GWS_SKIP_SKILL_REGISTRATION = '1'
-
 const { findViolation, buildDenyMessage } = await import('@gws-multi-account/core')
-const { registerSkillPath, configPathCandidates } = await import('../packages/opencode/src/skill-registration.js')
+const { addSkillsPath } = await import('../packages/opencode/src/skill-registration.js')
 const opencodeModule = await import('../packages/opencode/src/plugin.js')
 const typeclawModule = await import('../packages/typeclaw/src/plugin.js')
 
@@ -293,106 +289,22 @@ describe('published package manifests', () => {
 })
 
 describe('opencode skill registration', () => {
-  let tmpRoot: string
-  let projectDir: string
-
-  async function freshTmp() {
-    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ocgws-test-'))
-    projectDir = path.join(tmpRoot, 'project')
-    await fs.mkdir(projectDir, { recursive: true })
-  }
-
-  test('creates fallback config when none exists', async () => {
-    await freshTmp()
-    const cands = [
-      { path: path.join(projectDir, 'opencode.jsonc'), format: 'jsonc' as const },
-      { path: path.join(projectDir, 'opencode.json'), format: 'json' as const },
-      { path: path.join(tmpRoot, 'home', '.config', 'opencode', 'opencode.jsonc'), format: 'jsonc' as const },
-      { path: path.join(tmpRoot, 'home', '.config', 'opencode', 'opencode.json'), format: 'json' as const },
-    ]
-    const result = await registerSkillPath({ skillsDir: '/fake/bundled/skills', candidates: cands })
-    expect(result.kind).toBe('registered')
-    expect((result as { configPath: string }).configPath).toBe(cands[cands.length - 1]!.path)
-
-    const second = await registerSkillPath({ skillsDir: '/fake/bundled/skills', candidates: cands })
-    expect(second.kind).toBe('already-registered')
-    await fs.rm(tmpRoot, { recursive: true, force: true })
+  test('appends skills dir to in-memory config', () => {
+    const config: { skills?: { paths?: string[] } } = {}
+    addSkillsPath(config, '/bundled/skills')
+    expect(config.skills?.paths).toEqual(['/bundled/skills'])
   })
 
-  test('preserves existing json keys when appending skills.paths', async () => {
-    await freshTmp()
-    const target = path.join(projectDir, 'opencode.json')
-    await fs.writeFile(
-      target,
-      JSON.stringify({ $schema: 'https://opencode.ai/config.json', model: 'anthropic/claude-opus-4', theme: 'dark' }),
-      'utf8',
-    )
-    const result = await registerSkillPath({
-      skillsDir: '/other/path',
-      candidates: [{ path: target, format: 'json' }],
-    })
-    expect(result.kind).toBe('registered')
-
-    const after = JSON.parse(await fs.readFile(target, 'utf8'))
-    expect(after.model).toBe('anthropic/claude-opus-4')
-    expect(after.theme).toBe('dark')
-    expect(after.$schema).toBe('https://opencode.ai/config.json')
-    expect(after.skills.paths).toContain('/other/path')
-    await fs.rm(tmpRoot, { recursive: true, force: true })
+  test('preserves existing paths and dedupes', () => {
+    const config = { skills: { paths: ['/other', '/bundled/skills'] } }
+    addSkillsPath(config, '/bundled/skills')
+    expect(config.skills.paths).toEqual(['/other', '/bundled/skills'])
   })
 
-  test('refuses to rewrite .jsonc with comments — returns needs-manual-edit', async () => {
-    await freshTmp()
-    const target = path.join(projectDir, 'opencode.jsonc')
-    const body = `{
-  // User's personal preferences
-  "model": "anthropic/claude-opus-4",
-  "plugin": ["opencode-gws-multi-account"],
-}
-`
-    await fs.writeFile(target, body, 'utf8')
-    const result = await registerSkillPath({
-      skillsDir: '/brand/new',
-      candidates: [{ path: target, format: 'jsonc' }],
-    })
-    expect(result.kind).toBe('needs-manual-edit')
-    expect(await fs.readFile(target, 'utf8')).toBe(body)
-    await fs.rm(tmpRoot, { recursive: true, force: true })
-  })
-
-  test('writes to .jsonc when no comments are present', async () => {
-    await freshTmp()
-    const target = path.join(projectDir, 'opencode.jsonc')
-    await fs.writeFile(target, JSON.stringify({ model: 'abc' }), 'utf8')
-    const result = await registerSkillPath({
-      skillsDir: '/jsonc/safe',
-      candidates: [{ path: target, format: 'jsonc' }],
-    })
-    expect(result.kind).toBe('registered')
-    const after = JSON.parse(await fs.readFile(target, 'utf8'))
-    expect(after.model).toBe('abc')
-    expect(after.skills.paths).toContain('/jsonc/safe')
-    await fs.rm(tmpRoot, { recursive: true, force: true })
-  })
-})
-
-describe('configPathCandidates', () => {
-  const worktree = path.join(path.sep, 'b')
-  const globalSuffix = path.join('.config', 'opencode', 'opencode.jsonc')
-  const globalSuffixJson = path.join('.config', 'opencode', 'opencode.json')
-
-  test('project candidates come first, globals last', () => {
-    const cands = configPathCandidates({ directory: path.join(path.sep, 'a'), worktree })
-    expect(cands[0]!.path).toBe(path.join(worktree, 'opencode.jsonc'))
-    expect(cands[1]!.path).toBe(path.join(worktree, 'opencode.json'))
-    expect(cands[2]!.path).toContain(globalSuffix)
-    expect(cands[3]!.path).toContain(globalSuffixJson)
-  })
-
-  test('only globals when no project root is given', () => {
-    const cands = configPathCandidates({})
-    expect(cands).toHaveLength(2)
-    expect(cands[0]!.path).toContain(globalSuffix)
+  test('plugin exposes a config hook that never touches disk', async () => {
+    const hooks = await opencodeModule.GwsMultiAccountPlugin({ directory: '/tmp', worktree: '/tmp' } as never)
+    expect(typeof hooks.config).toBe('function')
+    await expect(hooks.config!({})).resolves.toBeUndefined()
   })
 })
 
