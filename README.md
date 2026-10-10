@@ -64,7 +64,7 @@ Add to your `opencode.json`:
 }
 ```
 
-On first run the plugin registers its bundled skill by appending the path to `skills.paths` in your config (idempotent, JSONC-safe). Restart opencode once after the first install to pick up the skill.
+The plugin registers its bundled skill at runtime through opencode's `config` hook — your config files are never modified.
 
 ### TypeClaw
 
@@ -97,7 +97,7 @@ All three plugins funnel every Bash-style command through the same enforcement f
 6. **Block with an actionable message.** Claude's hook writes a `PreToolUse` deny JSON to stdout (`permissionDecision: "deny"`) with the exact offending segment and a fix hint. opencode's hook throws with the same message, which opencode surfaces to the agent. Both messages point at `~/.config/gws/accounts.json` so the agent can pick the right account and retry; the auth-login message additionally points at the skill's background-spawn reference.
 7. **Fail open on crash.** If the parser itself throws, the Claude hook logs to stderr and exits 0 rather than bricking the user's Bash. The opencode hook inherits opencode's error surface but never swallows the user's command silently.
 
-On opencode startup there's a second, independent flow: the plugin resolves its bundled `skills/` directory (`../skills` relative to `dist/plugin.js`) and appends it to `skills.paths` in the first writable `opencode.json` / `opencode.jsonc` it finds (project, then `~/.config/opencode/`). Writes are atomic (temp file + rename) and idempotent. If the target is `.jsonc` with real JSONC features (comments, trailing commas), the plugin refuses to rewrite it and prints the path for manual editing — round-tripping through `JSON.parse` / `JSON.stringify` would silently strip those features. Set `OPENCODE_GWS_SKIP_SKILL_REGISTRATION=1` to disable this step.
+On opencode startup there's a second, independent flow: the plugin's `config` hook resolves its bundled `skills/` directory (`../skills` relative to `dist/plugin.js`) and adds it to the in-memory `skills.paths`. Nothing is written to disk, and because the path is re-resolved from `import.meta.url` on every launch it stays correct after package-cache reinstalls.
 
 ## Layout
 
@@ -164,7 +164,7 @@ After editing any `packages/*/src/`, run `bun run build` before committing so `h
 - **Word boundaries** — `gws` must be a standalone word (regex `(^|\s|=)gws(\s|$)`); `my_gws_wrapper` and `gwsfoo` don't trigger.
 - **Positional-arg matching** — the `gws auth login` check walks positional args (skipping flags) instead of substring-matching, so a file argument like `some-auth-login.pdf` or an unrelated subcommand like `gws auth something-else-login` never trips it.
 - **Fail open on crash** — a parser exception logs to stderr and exits 0 rather than blocking the user's Bash.
-- **JSONC-safe config writes** — when the opencode plugin detects comments or trailing commas in `opencode.jsonc`, it refuses to rewrite the file and prints the path for the user to paste manually.
+- **No config writes** — the opencode plugin injects its skill path through the `config` hook at runtime instead of editing `opencode.json` / `opencode.jsonc`, so JSONC comments are never at risk and nothing is printed on startup.
 
 ## License
 
