@@ -1,12 +1,13 @@
 # gws-multi-account
 
-Multi-account management for [`gws`](https://github.com/googleworkspace/cli), the Google Workspace CLI. A monorepo shipping plugins for three coding agents out of one shared core:
+Multi-account management for [`gws`](https://github.com/googleworkspace/cli), the Google Workspace CLI. A monorepo shipping plugins for four coding agents out of one shared core:
 
 - [**Claude Code**](https://claude.com/claude-code) — a PreToolUse hook that blocks bare `gws` calls, installed via the bundled marketplace (git clone).
 - [**opencode**](https://opencode.ai) — a `tool.execute.before` hook and auto-registered skill, published to npm as **`opencode-gws-multi-account`**.
 - [**TypeClaw**](https://typeclaw.dev) — a `tool.before` hook and a contributed skill, published to npm as **`typeclaw-gws-multi-account`**.
+- [**omo**](https://github.com/code-yeongyu/oh-my-openagent) (omo native) — a `tool_call` extension hook and a bundled skill, published to npm as **`omo-gws-multi-account`**.
 
-All three plugins share the same enforcement logic (`packages/core`) and the same `SKILL.md`. One source tree, three targets.
+All four plugins share the same enforcement logic (`packages/core`) and the same `SKILL.md`. One source tree, four targets.
 
 ## Why
 
@@ -76,7 +77,15 @@ Add the package to `plugins[]` in your `typeclaw.json`:
 }
 ```
 
-The plugin's `plugin` factory contributes a `tool.before` hook (same enforcement as the other two hosts) and the bundled `gws-multi-account` skill via `skillsDirs`. Restart the agent to load it.
+The plugin's `plugin` factory contributes a `tool.before` hook (same enforcement as the other hosts) and the bundled `gws-multi-account` skill via `skillsDirs`. Restart the agent to load it.
+
+### omo
+
+```bash
+omo install npm:omo-gws-multi-account
+```
+
+The package is a standard senpi/pi package: its `package.json` `pi` manifest loads `dist/extension.js` (a `tool_call` hook that blocks offending `bash` calls) and the bundled `skills/` directory. Add `-l` to install it for the current project only.
 
 ## Platform support
 
@@ -87,9 +96,9 @@ CI runs the full pipeline on Ubuntu, macOS, and Windows.
 
 ## How it works
 
-All three plugins funnel every Bash-style command through the same enforcement function (`packages/core`) before the agent is allowed to run it.
+All four plugins funnel every Bash-style command through the same enforcement function (`packages/core`) before the agent is allowed to run it.
 
-1. **Intercept the command.** On Claude Code, `hooks/hooks.json` registers `hook.js` as a `PreToolUse` hook matching the `Bash` tool; the hook receives the tool payload on stdin. On opencode, `plugin.ts` registers a `tool.execute.before` callback that fires for the `bash` tool with the resolved command args. On TypeClaw, the plugin's `plugin` factory contributes a `tool.before` hook that gates the built-in `bash` tool and returns `{ block: true, reason }` to block. Non-Bash tools and empty commands short-circuit immediately.
+1. **Intercept the command.** On Claude Code, `hooks/hooks.json` registers `hook.js` as a `PreToolUse` hook matching the `Bash` tool; the hook receives the tool payload on stdin. On opencode, `plugin.ts` registers a `tool.execute.before` callback that fires for the `bash` tool with the resolved command args. On TypeClaw, the plugin's `plugin` factory contributes a `tool.before` hook that gates the built-in `bash` tool and returns `{ block: true, reason }` to block. On omo, the extension registers a `tool_call` handler that gates the built-in `bash` tool and likewise returns `{ block: true, reason }`. Non-Bash tools and empty commands short-circuit immediately.
 2. **Split into segments.** `parser.ts` splits the command on shell control operators (`;`, `&&`, `||`, `|`, `&`) and evaluates each segment independently. This is why `cd foo && gws …` requires the env var on the `gws` segment — the `cd` segment is irrelevant.
 3. **Find the real command word.** Within a segment, the parser walks past transparent prefixes: `NAME=VALUE` assignments and the `env` builtin. The first bare word is the actual command. If it isn't `gws` (word-boundary match, so `my_gws_wrapper` and `gwsfoo` don't trigger), the segment passes.
 4. **Check for foreground `gws auth login`.** If the next two non-flag positional args are `auth` then `login`, and the segment was not backgrounded (trailing `&` at the original split point), it's a violation regardless of whether the env var is set — the env var doesn't help when the real problem is the interactive callback server getting killed by the agent's command timeout. `gws auth status`, `gws auth logout`, `gws auth setup`, and background-spawned `gws auth login ... &` all pass.
@@ -123,11 +132,13 @@ On opencode startup there's a second, independent flow: the plugin's `config` ho
 │   │   └── src/
 │   │       ├── plugin.ts     opencode plugin entry (tool.execute.before hook)
 │   │       └── skill-registration.ts
-│   └── typeclaw/             typeclaw-gws-multi-account (npm)
-│       └── src/plugin.ts     TypeClaw plugin entry (definePlugin + tool.before hook)
+│   ├── typeclaw/             typeclaw-gws-multi-account (npm)
+│   │   └── src/plugin.ts     TypeClaw plugin entry (definePlugin + tool.before hook)
+│   └── omo/                  omo-gws-multi-account (npm, pi package)
+│       └── src/extension.ts  omo extension entry (tool_call hook)
 ├── tests/
 │   └── hook.test.ts          bun test — parser, entries, registration, manifests
-├── build.ts                  One script, all targets (hooks/ + both packages' dist/)
+├── build.ts                  One script, all targets (hooks/ + each npm package's dist/)
 ├── package.json              Private workspace root (workspaces: packages/*)
 ├── tsconfig.json / tsconfig.base.json
 ├── .oxlintrc.json
@@ -140,7 +151,7 @@ All commands run from the repo root and operate across the whole workspace:
 
 ```bash
 bun install
-bun run build       # hooks/hook.js + packages/{opencode,typeclaw}/dist + skills copies
+bun run build       # hooks/hook.js + packages/{opencode,typeclaw,omo}/dist + skills copies
 bun run test
 bun run typecheck
 bun run lint
@@ -152,7 +163,7 @@ bun run format:check
 
 - **`hooks/hook.js`** is **committed to git.** Claude Code's marketplace installer clones from GitHub and cannot run `bun build`, so the pre-built hook must be present in the tree.
 - **`skills/`** at the repo root is **committed** — it's the canonical skill source and Claude's marketplace clones it directly.
-- **`packages/*/dist/`**, the per-package **`skills/`** copies, and per-package **`README.md`/`LICENSE`** are **gitignored** build artifacts. The two npm packages (`opencode-gws-multi-account`, `typeclaw-gws-multi-account`) install from npm; `@gws-multi-account/core` is private and bundled inline at build time, so it is never published.
+- **`packages/*/dist/`**, the per-package **`skills/`** copies, and per-package **`README.md`/`LICENSE`** are **gitignored** build artifacts. The three npm packages (`opencode-gws-multi-account`, `typeclaw-gws-multi-account`, `omo-gws-multi-account`) install from npm; `@gws-multi-account/core` is private and bundled inline at build time, so it is never published.
 
 After editing any `packages/*/src/`, run `bun run build` before committing so `hooks/hook.js` stays in sync. CI runs the full pipeline on every push/PR (`bun run lint`, `format:check`, `typecheck`, `test`) and then verifies no drift via `git diff --exit-code hooks/` — so if you forget to rebuild, the check fails with a clear message.
 
