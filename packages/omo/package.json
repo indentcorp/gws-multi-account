@@ -1,6 +1,6 @@
 {
   "name": "omo-gws-multi-account",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Multi-account management for the Google Workspace CLI (`gws`). omo package: a `tool_call` hook and a bundled skill.",
   "keywords": [
     "google-workspace",
