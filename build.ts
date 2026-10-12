@@ -50,10 +50,26 @@ if (!typeclawBuild.success) {
   process.exit(1)
 }
 
+const omoBuild = await Bun.build({
+  entrypoints: ['packages/omo/src/extension.ts'],
+  outdir: 'packages/omo/dist',
+  target: 'node',
+  format: 'esm',
+  splitting: false,
+  sourcemap: 'linked',
+  external: [],
+})
+
+if (!omoBuild.success) {
+  console.error('omo build failed:')
+  for (const log of omoBuild.logs) console.error(log)
+  process.exit(1)
+}
+
 // Each npm package ships a self-contained copy of the canonical root skills/
 // (so the runtime `../skills` lookup resolves inside the tarball) plus the
 // shared README/LICENSE referenced by its package.json "files".
-for (const pkg of ['opencode', 'typeclaw']) {
+for (const pkg of ['opencode', 'typeclaw', 'omo']) {
   const skillsDest = `packages/${pkg}/skills`
   await rm(skillsDest, { recursive: true, force: true })
   await cp('skills', skillsDest, { recursive: true })
@@ -64,14 +80,16 @@ for (const pkg of ['opencode', 'typeclaw']) {
 
 // Project references build core's declarations first, then each package's.
 // --force avoids incremental-cache nondeterminism on a clean tree.
-execSync('bunx tsc -b packages/opencode/tsconfig.build.json packages/typeclaw/tsconfig.build.json --force', {
-  stdio: 'inherit',
-})
+execSync(
+  'bunx tsc -b packages/opencode/tsconfig.build.json packages/typeclaw/tsconfig.build.json packages/omo/tsconfig.build.json --force',
+  { stdio: 'inherit' },
+)
 
 console.log('Build OK.')
 console.log('  claude   → hooks/hook.js')
 console.log('  opencode → packages/opencode/dist/plugin.js (+ .d.ts, skills/)')
 console.log('  typeclaw → packages/typeclaw/dist/plugin.js (+ .d.ts, skills/)')
+console.log('  omo      → packages/omo/dist/extension.js (+ .d.ts, skills/)')
 
 async function applyTypeClawSkillNotes(skillsDest: string): Promise<void> {
   const skillPath = `${skillsDest}/gws-multi-account/SKILL.md`

@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "references": [{ "path": "../core/tsconfig.build.json" }],
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "declarationMap": true,
+    "paths": {
+      "@gws-multi-account/core": ["../core/dist/parser.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}
