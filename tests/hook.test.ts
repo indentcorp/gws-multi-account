@@ -6,6 +6,7 @@ const { findViolation, buildDenyMessage } = await import('@gws-multi-account/cor
 const { addSkillsPath } = await import('../packages/opencode/src/skill-registration.js')
 const opencodeModule = await import('../packages/opencode/src/plugin.js')
 const typeclawModule = await import('../packages/typeclaw/src/plugin.js')
+const omoModule = await import('../packages/omo/src/extension.js')
 
 describe('parser.findViolation', () => {
   test.each([
@@ -263,6 +264,67 @@ describe('typeclaw plugin entry', () => {
   })
 })
 
+describe('omo extension entry', () => {
+  const { evaluateToolCall } = omoModule
+
+  test('default export registers a tool_call handler that blocks bare gws', async () => {
+    const handlers = new Map<string, (event: unknown) => unknown>()
+    omoModule.default({ on: (name, handler) => handlers.set(name, handler as (event: unknown) => unknown) })
+    const handler = handlers.get('tool_call')
+    expect(typeof handler).toBe('function')
+    const r = await handler!({ toolName: 'bash', input: { command: 'gws drive files list' } })
+    expect((r as { block: boolean }).block).toBe(true)
+  })
+
+  test('denies bare gws with reason', () => {
+    const r = evaluateToolCall({ toolName: 'bash', input: { command: 'gws drive files list' } })
+    expect((r as { block: boolean }).block).toBe(true)
+    expect((r as { reason: string }).reason).toContain('omo-gws-multi-account plugin')
+  })
+
+  test('denies quoted literal tilde with $HOME hint', () => {
+    const r = evaluateToolCall({
+      toolName: 'bash',
+      input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR="~/.config/gws/a@b.com" gws drive files list' },
+    })
+    expect((r as { reason: string }).reason).toContain('$HOME')
+  })
+
+  test('denies foreground gws auth login even with env var set', () => {
+    const r = evaluateToolCall({
+      toolName: 'bash',
+      input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth login --full' },
+    })
+    expect((r as { reason: string }).reason.toLowerCase()).toContain('oauth')
+  })
+
+  test('allows backgrounded gws auth login', () => {
+    expect(
+      evaluateToolCall({
+        toolName: 'bash',
+        input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a nohup gws auth login --full > /tmp/log 2>&1 &' },
+      }),
+    ).toBeUndefined()
+  })
+
+  test('allows env-prefixed gws', () => {
+    expect(
+      evaluateToolCall({
+        toolName: 'bash',
+        input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files list' },
+      }),
+    ).toBeUndefined()
+  })
+
+  test('ignores non-bash tools', () => {
+    expect(evaluateToolCall({ toolName: 'read', input: { command: 'gws x' } })).toBeUndefined()
+  })
+
+  test('ignores empty command', () => {
+    expect(evaluateToolCall({ toolName: 'bash', input: {} })).toBeUndefined()
+  })
+})
+
 describe('published package manifests', () => {
   const opencodePkg = require('../packages/opencode/package.json') as {
     name: string
@@ -279,6 +341,20 @@ describe('published package manifests', () => {
     expect(opencodePkg.name).toBe('opencode-gws-multi-account')
     expect(opencodePkg.main).toBe('./dist/plugin.js')
     expect(opencodePkg.files).toContain('skills')
+  })
+
+  test('omo package declares its extension and skills for the pi loader', () => {
+    const omoPkg = require('../packages/omo/package.json') as {
+      name: string
+      keywords: string[]
+      files: string[]
+      pi: { extensions: string[]; skills: string[] }
+    }
+    expect(omoPkg.name).toBe('omo-gws-multi-account')
+    expect(omoPkg.keywords).toContain('pi-package')
+    expect(omoPkg.files).toEqual(expect.arrayContaining(['dist', 'skills']))
+    expect(omoPkg.pi.extensions).toEqual(['./dist/extension.js'])
+    expect(omoPkg.pi.skills).toEqual(['./skills'])
   })
 
   test('typeclaw package name and entry', () => {

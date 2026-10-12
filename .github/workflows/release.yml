@@ -7,7 +7,7 @@ on:
         description: 'Version (x.y.z)'
         required: true
       target:
-        description: 'Publish target: all, opencode, or typeclaw'
+        description: 'Publish target: all, opencode, typeclaw, or omo'
         required: false
         default: 'all'
 
@@ -62,6 +62,7 @@ jobs:
               'packages/claude/package.json',
               'packages/opencode/package.json',
               'packages/typeclaw/package.json',
+              'packages/omo/package.json',
               '.claude-plugin/plugin.json',
             ];
             for (const f of files) {
@@ -91,6 +92,7 @@ jobs:
               'packages/claude/package.json',
               'packages/opencode/package.json',
               'packages/typeclaw/package.json',
+              'packages/omo/package.json',
               '.claude-plugin/plugin.json',
             ];
             for (const f of files) {
@@ -125,8 +127,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Publish omo package to npm
+        if: ${{ inputs.target == 'all' || inputs.target == 'omo' }}
+        run: npm publish --provenance --access public -w packages/omo
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Create GitHub Release
-        if: ${{ inputs.target == 'all' || inputs.target == 'typeclaw' }}
+        if: ${{ inputs.target == 'all' || inputs.target == 'typeclaw' || inputs.target == 'omo' }}
         run: gh release view "${{ inputs.version }}" >/dev/null 2>&1 || gh release create "${{ inputs.version }}" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
