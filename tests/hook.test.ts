@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -99,20 +99,79 @@ describe('GWS_ACCOUNT shorthand', () => {
     )
   })
 
-  test('detects the wrapper by its marker, first gws on PATH only', () => {
-    const wrapperDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapper-'))
-    const realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'real-'))
-    try {
-      fs.writeFileSync(path.join(wrapperDir, 'gws'), '#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
-      fs.writeFileSync(path.join(realDir, 'gws'), '#!/usr/bin/env node\n')
-      expect(gwsOnPathIsAccountsWrapper([wrapperDir, realDir].join(path.delimiter))).toBe(true)
-      expect(gwsOnPathIsAccountsWrapper([realDir, wrapperDir].join(path.delimiter))).toBe(false)
-      expect(gwsOnPathIsAccountsWrapper('')).toBe(false)
-    } finally {
-      fs.rmSync(wrapperDir, { recursive: true, force: true })
-      fs.rmSync(realDir, { recursive: true, force: true })
-    }
+  test.each(['gws drive files list', 'GWS_ACCOUNT= gws drive files list'])(
+    'a denial without the shorthand keeps the original message: %s',
+    (cmd) => {
+      expect(buildDenyMessage(findViolation(cmd, { accountsWrapper: true })!, 'test-plugin')).toBe(
+        'Bare `gws` blocked by test-plugin. ' +
+          'The gws-multi-account layout requires `GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws/<email>"` on every invocation ' +
+          '(on Windows: `%USERPROFILE%\\.config\\gws\\<email>`). ' +
+          'Fix: prefix the command with the env var. ' +
+          `Offending segment: \`${cmd}\`. See \`~/.config/gws/accounts.json\` for configured accounts.`,
+      )
+    },
+  )
+
+  test('a denied shorthand says why it did not count', () => {
+    const violation = findViolation('GWS_ACCOUNT=work gws drive files list', { accountsWrapper: false })!
+    expect(buildDenyMessage(violation, 'test-plugin')).toContain(
+      '`GWS_ACCOUNT` counts only when the first `gws` on PATH is the gws-accounts wrapper, and it is not. ',
+    )
   })
+})
+
+describe('gwsOnPathIsAccountsWrapper', () => {
+  const WRAPPER = '#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n'
+  const REAL = '#!/usr/bin/env node\n'
+  const dirs: string[] = []
+
+  // A PATH entry holding a `gws` file with these contents and mode, or a
+  // directory named `gws` when contents is null.
+  function gwsDir(contents: string | null, mode = 0o755): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gws-path-'))
+    dirs.push(dir)
+    const gws = path.join(dir, 'gws')
+    if (contents === null) {
+      fs.mkdirSync(gws)
+    } else {
+      fs.writeFileSync(gws, contents)
+      fs.chmodSync(gws, mode)
+    }
+    return dir
+  }
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  const onPath = (...entries: string[]) => gwsOnPathIsAccountsWrapper(entries.join(path.delimiter))
+
+  test('detects the wrapper by its marker, first gws on PATH only', () => {
+    const wrapperDir = gwsDir(WRAPPER)
+    const realDir = gwsDir(REAL)
+    expect(onPath(wrapperDir, realDir)).toBe(true)
+    expect(onPath(realDir, wrapperDir)).toBe(false)
+    expect(gwsOnPathIsAccountsWrapper('')).toBe(false)
+  })
+
+  test('skips a directory named gws, as the shell does', () => {
+    expect(onPath(gwsDir(null), gwsDir(WRAPPER))).toBe(true)
+    expect(onPath(gwsDir(null), gwsDir(REAL))).toBe(false)
+  })
+
+  // Windows has no execute bit: Node treats X_OK as F_OK there.
+  test.skipIf(process.platform === 'win32')('skips a gws that is not executable, as the shell does', () => {
+    expect(onPath(gwsDir(WRAPPER, 0o644), gwsDir(REAL))).toBe(false)
+    expect(onPath(gwsDir(REAL, 0o644), gwsDir(WRAPPER))).toBe(true)
+  })
+
+  // Root reads any file, so the unreadable case only exists for other users.
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'an executable gws whose marker cannot be read is not the wrapper',
+    () => {
+      expect(onPath(gwsDir(WRAPPER, 0o111), gwsDir(WRAPPER))).toBe(false)
+    },
+  )
 })
 
 describe('parser.buildDenyMessage', () => {

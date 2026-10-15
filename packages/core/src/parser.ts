@@ -1,4 +1,4 @@
-import { closeSync, openSync, readSync } from 'node:fs'
+import { accessSync, closeSync, constants, openSync, readSync, statSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 
 export const ENV_VAR = 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR'
@@ -25,27 +25,41 @@ export type ViolationKind = 'missing-env' | 'literal-tilde' | 'foreground-auth-l
 export interface Violation {
   kind: ViolationKind
   segment: string
+  // Set on a missing-env violation whose segment used the GWS_ACCOUNT
+  // shorthand, which did not count because the gws-accounts wrapper is not
+  // the first gws on PATH.
+  accountShorthand?: boolean
 }
 
 // gws-accounts (github.com/sjawhar/gws-accounts) is a wrapper that turns
 // GWS_ACCOUNT=<name> into GOOGLE_WORKSPACE_CLI_CONFIG_DIR. Real gws ignores
-// GWS_ACCOUNT, so the shorthand counts only when the first gws on PATH is
-// that wrapper, which carries its marker in its first 512 bytes.
+// GWS_ACCOUNT, so the shorthand counts only when the gws the shell would run
+// (the first executable regular file named gws on PATH) is that wrapper,
+// which carries its marker in its first 512 bytes.
 export function gwsOnPathIsAccountsWrapper(pathEnv: string = process.env.PATH ?? ''): boolean {
   for (const dir of pathEnv.split(delimiter)) {
     if (!dir) continue
-    let fd: number
+    const candidate = join(dir, 'gws')
     try {
-      fd = openSync(join(dir, 'gws'), 'r')
+      if (!statSync(candidate).isFile()) continue
+      accessSync(candidate, constants.X_OK)
     } catch {
       continue
+    }
+    // This is the gws the shell runs: it is the wrapper only if its marker
+    // can be read.
+    let fd: number
+    try {
+      fd = openSync(candidate, 'r')
+    } catch {
+      return false
     }
     try {
       const buf = Buffer.alloc(512)
       const n = readSync(fd, buf, 0, 512, 0)
       return buf.subarray(0, n).toString('latin1').includes(ACCOUNTS_WRAPPER_MARKER)
     } catch {
-      continue
+      return false
     } finally {
       closeSync(fd)
     }
@@ -109,11 +123,10 @@ export function findViolation(command: string, options: FindViolationOptions = {
     }
 
     if (!hasEnv) {
-      if (hasAccount) {
-        accountsWrapper ??= gwsOnPathIsAccountsWrapper()
-        if (accountsWrapper) continue
-      }
-      return { kind: 'missing-env', segment: text }
+      if (!hasAccount) return { kind: 'missing-env', segment: text }
+      accountsWrapper ??= gwsOnPathIsAccountsWrapper()
+      if (accountsWrapper) continue
+      return { kind: 'missing-env', segment: text, accountShorthand: true }
     }
     if (quotedTildeValue) return { kind: 'literal-tilde', segment: text }
   }
@@ -150,8 +163,10 @@ export function buildDenyMessage(violation: Violation, pluginName: string): stri
     `Bare \`gws\` blocked by ${pluginName}. ` +
     `The gws-multi-account layout requires \`${ENV_VAR}="$HOME/.config/gws/<email>"\` on every invocation ` +
     `(on Windows: \`%USERPROFILE%\\.config\\gws\\<email>\`). ` +
+    (violation.accountShorthand
+      ? `\`${ACCOUNT_VAR}\` counts only when the first \`gws\` on PATH is the gws-accounts wrapper, and it is not. `
+      : '') +
     `Fix: prefix the command with the env var. ` +
-    `With the gws-accounts wrapper installed, \`${ACCOUNT_VAR}=<account>\` works too. ` +
     tail
   )
 }

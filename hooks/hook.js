@@ -4,7 +4,7 @@
 import { stdin } from "node:process";
 
 // packages/core/src/parser.ts
-import { closeSync, openSync, readSync } from "node:fs";
+import { accessSync, closeSync, constants, openSync, readSync, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 var ENV_VAR = "GOOGLE_WORKSPACE_CLI_CONFIG_DIR";
 var ACCOUNT_VAR = "GWS_ACCOUNT";
@@ -16,18 +16,26 @@ function gwsOnPathIsAccountsWrapper(pathEnv = process.env.PATH ?? "") {
   for (const dir of pathEnv.split(delimiter)) {
     if (!dir)
       continue;
-    let fd;
+    const candidate = join(dir, "gws");
     try {
-      fd = openSync(join(dir, "gws"), "r");
+      if (!statSync(candidate).isFile())
+        continue;
+      accessSync(candidate, constants.X_OK);
     } catch {
       continue;
+    }
+    let fd;
+    try {
+      fd = openSync(candidate, "r");
+    } catch {
+      return false;
     }
     try {
       const buf = Buffer.alloc(512);
       const n = readSync(fd, buf, 0, 512, 0);
       return buf.subarray(0, n).toString("latin1").includes(ACCOUNTS_WRAPPER_MARKER);
     } catch {
-      continue;
+      return false;
     } finally {
       closeSync(fd);
     }
@@ -73,12 +81,12 @@ function findViolation(command, options = {}) {
       return { kind: "foreground-auth-login", segment: text };
     }
     if (!hasEnv) {
-      if (hasAccount) {
-        accountsWrapper ??= gwsOnPathIsAccountsWrapper();
-        if (accountsWrapper)
-          continue;
-      }
-      return { kind: "missing-env", segment: text };
+      if (!hasAccount)
+        return { kind: "missing-env", segment: text };
+      accountsWrapper ??= gwsOnPathIsAccountsWrapper();
+      if (accountsWrapper)
+        continue;
+      return { kind: "missing-env", segment: text, accountShorthand: true };
     }
     if (quotedTildeValue)
       return { kind: "literal-tilde", segment: text };
@@ -93,7 +101,7 @@ function buildDenyMessage(violation, pluginName) {
   if (violation.kind === "foreground-auth-login") {
     return `Foreground \`gws auth login\` blocked by ${pluginName}. ` + `\`gws auth login\` is an interactive OAuth flow that starts a localhost callback server; ` + `the agent shell's ~60s command timeout will kill it mid-flow and strand the user with a dead URL. ` + `Fix: background-spawn it and poll \`gws auth status\`. ` + `Follow the flow in \`skills/gws-multi-account/references/auth-login.md\` ` + `(tl;dr: \`${ENV_VAR}=... nohup gws auth login --full > /tmp/gws-auth/<email>.log 2>&1 & disown\`, ` + `then \`grep -oE 'https://accounts\\.google\\.com/o/oauth2/\\S+' /tmp/gws-auth/<email>.log\` to share the URL). ` + tail;
   }
-  return `Bare \`gws\` blocked by ${pluginName}. ` + `The gws-multi-account layout requires \`${ENV_VAR}="$HOME/.config/gws/<email>"\` on every invocation ` + `(on Windows: \`%USERPROFILE%\\.config\\gws\\<email>\`). ` + `Fix: prefix the command with the env var. ` + `With the gws-accounts wrapper installed, \`${ACCOUNT_VAR}=<account>\` works too. ` + tail;
+  return `Bare \`gws\` blocked by ${pluginName}. ` + `The gws-multi-account layout requires \`${ENV_VAR}="$HOME/.config/gws/<email>"\` on every invocation ` + `(on Windows: \`%USERPROFILE%\\.config\\gws\\<email>\`). ` + (violation.accountShorthand ? `\`${ACCOUNT_VAR}\` counts only when the first \`gws\` on PATH is the gws-accounts wrapper, and it is not. ` : "") + `Fix: prefix the command with the env var. ` + tail;
 }
 function splitSegments(command) {
   const out = [];
