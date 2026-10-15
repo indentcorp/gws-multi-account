@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
-const { findViolation, buildDenyMessage } = await import('@gws-multi-account/core')
+const { findViolation, buildDenyMessage, gwsOnPathIsAccountsWrapper } = await import('@gws-multi-account/core')
 const { addSkillsPath } = await import('../packages/opencode/src/skill-registration.js')
 const opencodeModule = await import('../packages/opencode/src/plugin.js')
 const typeclawModule = await import('../packages/typeclaw/src/plugin.js')
@@ -75,6 +77,41 @@ describe('parser.findViolation', () => {
     ['subcommand with login in name', 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws auth something-else-login'],
   ])('allows: %s', (_label, cmd) => {
     expect(findViolation(cmd)).toBeNull()
+  })
+})
+
+describe('GWS_ACCOUNT shorthand', () => {
+  test('passes when the gws-accounts wrapper is first on PATH', () => {
+    expect(findViolation('GWS_ACCOUNT=work gws drive files list', { accountsWrapper: true })).toBeNull()
+  })
+
+  test('denies when the wrapper is not on PATH', () => {
+    expect(findViolation('GWS_ACCOUNT=work gws drive files list', { accountsWrapper: false })?.kind).toBe('missing-env')
+  })
+
+  test('an empty GWS_ACCOUNT does not count', () => {
+    expect(findViolation('GWS_ACCOUNT= gws drive files list', { accountsWrapper: true })?.kind).toBe('missing-env')
+  })
+
+  test('foreground auth login is still denied', () => {
+    expect(findViolation('GWS_ACCOUNT=work gws auth login', { accountsWrapper: true })?.kind).toBe(
+      'foreground-auth-login',
+    )
+  })
+
+  test('detects the wrapper by its marker, first gws on PATH only', () => {
+    const wrapperDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapper-'))
+    const realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'real-'))
+    try {
+      fs.writeFileSync(path.join(wrapperDir, 'gws'), '#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
+      fs.writeFileSync(path.join(realDir, 'gws'), '#!/usr/bin/env node\n')
+      expect(gwsOnPathIsAccountsWrapper([wrapperDir, realDir].join(path.delimiter))).toBe(true)
+      expect(gwsOnPathIsAccountsWrapper([realDir, wrapperDir].join(path.delimiter))).toBe(false)
+      expect(gwsOnPathIsAccountsWrapper('')).toBe(false)
+    } finally {
+      fs.rmSync(wrapperDir, { recursive: true, force: true })
+      fs.rmSync(realDir, { recursive: true, force: true })
+    }
   })
 })
 
