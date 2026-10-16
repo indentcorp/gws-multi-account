@@ -4,48 +4,173 @@
 import { stdin } from "node:process";
 
 // packages/core/src/parser.ts
+import { accessSync, closeSync, constants, openSync, readSync, statSync } from "node:fs";
+import { delimiter, isAbsolute, join } from "node:path";
 var ENV_VAR = "GOOGLE_WORKSPACE_CLI_CONFIG_DIR";
+var ACCOUNT_VAR = "GWS_ACCOUNT";
+var ACCOUNTS_WRAPPER_MARKER = "gws-accounts-wrapper";
 var ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 var GWS_WORD = /(^|[\s=])gws(\s|$)/;
 var QUOTED_TILDE = /^["']~(\/|["']|$)/;
-function findViolation(command) {
-  const segments = splitSegments(command);
-  for (const { text, backgrounded } of segments) {
-    if (!GWS_WORD.test(text))
+function gwsOnPathIsAccountsWrapper(pathEnv = process.env.PATH ?? "") {
+  if (process.platform === "win32")
+    return false;
+  for (const pathEntry of pathEnv.split(delimiter)) {
+    const dir = pathEntry || ".";
+    const candidate = join(dir, "gws");
+    try {
+      if (!statSync(candidate).isFile())
+        continue;
+      accessSync(candidate, constants.X_OK);
+    } catch {
       continue;
-    const tokens = text.split(/\s+/);
+    }
+    let fd;
+    try {
+      fd = openSync(candidate, "r");
+    } catch {
+      return false;
+    }
+    try {
+      const buf = Buffer.alloc(512);
+      const n = readSync(fd, buf, 0, 512, 0);
+      return buf.subarray(0, n).toString("latin1").includes(ACCOUNTS_WRAPPER_MARKER);
+    } catch {
+      return false;
+    } finally {
+      closeSync(fd);
+    }
+  }
+  return false;
+}
+function findViolation(command, options = {}) {
+  let accountsWrapper = options.accountsWrapper;
+  let shorthandPathIsStable = true;
+  const segments = splitSegments(command);
+  for (const { text, backgrounded, separator } of segments) {
+    if (GWS_WORD.test(text)) {
+      const tokens = text.split(/\s+/);
+      if (hasUnquotedCommandNewline(command) && commandUsesGwsAccountShorthand(tokens)) {
+        return { kind: "missing-env", segment: text, accountShorthand: true, accountCommandNewline: true };
+      }
+      let hasEnv = false;
+      let hasAccount = false;
+      let hasPathAssignment = false;
+      let quotedTildeValue = false;
+      let cmdWord = null;
+      let cmdIndex = -1;
+      for (let i = 0;i < tokens.length; i += 1) {
+        const tok = tokens[i];
+        if (tok === "env")
+          continue;
+        if (tok.startsWith(`${ENV_VAR}=`)) {
+          hasEnv = true;
+          const value = tok.slice(ENV_VAR.length + 1);
+          if (QUOTED_TILDE.test(value))
+            quotedTildeValue = true;
+          continue;
+        }
+        if (tok.startsWith(`${ACCOUNT_VAR}=`) && tok.length > ACCOUNT_VAR.length + 1) {
+          hasAccount = true;
+          continue;
+        }
+        if (tok.startsWith("PATH=")) {
+          hasPathAssignment = true;
+          continue;
+        }
+        if (ENV_ASSIGNMENT.test(tok))
+          continue;
+        cmdWord = tok;
+        cmdIndex = i;
+        break;
+      }
+      if (cmdWord === "gws") {
+        if (!backgrounded && isAuthLoginCall(tokens, cmdIndex)) {
+          return { kind: "foreground-auth-login", segment: text };
+        }
+        if (!hasEnv) {
+          if (!hasAccount)
+            return { kind: "missing-env", segment: text };
+          if (hasPathAssignment) {
+            return { kind: "missing-env", segment: text, accountShorthand: true, accountPathOverride: true };
+          }
+          if (!shorthandPathIsStable) {
+            return { kind: "missing-env", segment: text, accountShorthand: true, accountPathUncertain: true };
+          }
+          accountsWrapper ??= gwsOnPathIsAccountsWrapper();
+          if (!accountsWrapper)
+            return { kind: "missing-env", segment: text, accountShorthand: true };
+        }
+        if (quotedTildeValue)
+          return { kind: "literal-tilde", segment: text };
+      }
+    }
+    if (sameShellSegmentMayChangeGwsResolution(text, separator)) {
+      shorthandPathIsStable = false;
+    }
+  }
+  return null;
+}
+function sameShellSegmentMayChangeGwsResolution(text, separator) {
+  if (separator === null || separator === "|" || separator === "&")
+    return false;
+  return !isPlainDirectoryChange(text);
+}
+function isPlainDirectoryChange(text) {
+  const tokens = text.split(/\s+/);
+  if (tokens[0] !== "cd" && tokens[0] !== "pushd" || tokens.length > 2)
+    return false;
+  return !(process.env.PATH ?? "").split(delimiter).some((entry) => !entry || !isAbsolute(entry));
+}
+function hasUnquotedCommandNewline(command) {
+  let quote = null;
+  for (let i = 0;i < command.length; i += 1) {
+    const char = command[i];
+    if (quote !== null) {
+      if (char === "\\" && quote === '"' && i + 1 < command.length) {
+        i += 1;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+    } else if (char === "\\" && i + 1 < command.length) {
+      i += 1;
+    } else if (char === `
+` || char === "\r") {
+      return true;
+    }
+  }
+  return false;
+}
+function commandUsesGwsAccountShorthand(tokens) {
+  for (let i = 0;i < tokens.length; i += 1) {
+    if (tokens[i] !== "gws")
+      continue;
+    let hasAccount = false;
     let hasEnv = false;
-    let quotedTildeValue = false;
-    let cmdWord = null;
-    let cmdIndex = -1;
-    for (let i = 0;i < tokens.length; i += 1) {
-      const tok = tokens[i];
+    for (let j = i - 1;j >= 0; j -= 1) {
+      const tok = tokens[j];
       if (tok === "env")
         continue;
       if (tok.startsWith(`${ENV_VAR}=`)) {
         hasEnv = true;
-        const value = tok.slice(ENV_VAR.length + 1);
-        if (QUOTED_TILDE.test(value))
-          quotedTildeValue = true;
+        continue;
+      }
+      if (tok.startsWith(`${ACCOUNT_VAR}=`) && tok.length > ACCOUNT_VAR.length + 1) {
+        hasAccount = true;
         continue;
       }
       if (ENV_ASSIGNMENT.test(tok))
         continue;
-      cmdWord = tok;
-      cmdIndex = i;
       break;
     }
-    if (cmdWord !== "gws")
-      continue;
-    if (!backgrounded && isAuthLoginCall(tokens, cmdIndex)) {
-      return { kind: "foreground-auth-login", segment: text };
-    }
-    if (!hasEnv)
-      return { kind: "missing-env", segment: text };
-    if (quotedTildeValue)
-      return { kind: "literal-tilde", segment: text };
+    if (hasAccount && !hasEnv)
+      return true;
   }
-  return null;
+  return false;
 }
 function buildDenyMessage(violation, pluginName) {
   const tail = `Offending segment: \`${violation.segment}\`. See \`~/.config/gws/accounts.json\` for configured accounts.`;
@@ -55,7 +180,7 @@ function buildDenyMessage(violation, pluginName) {
   if (violation.kind === "foreground-auth-login") {
     return `Foreground \`gws auth login\` blocked by ${pluginName}. ` + `\`gws auth login\` is an interactive OAuth flow that starts a localhost callback server; ` + `the agent shell's ~60s command timeout will kill it mid-flow and strand the user with a dead URL. ` + `Fix: background-spawn it and poll \`gws auth status\`. ` + `Follow the flow in \`skills/gws-multi-account/references/auth-login.md\` ` + `(tl;dr: \`${ENV_VAR}=... nohup gws auth login --full > /tmp/gws-auth/<email>.log 2>&1 & disown\`, ` + `then \`grep -oE 'https://accounts\\.google\\.com/o/oauth2/\\S+' /tmp/gws-auth/<email>.log\` to share the URL). ` + tail;
   }
-  return `Bare \`gws\` blocked by ${pluginName}. ` + `The gws-multi-account layout requires \`${ENV_VAR}="$HOME/.config/gws/<email>"\` on every invocation ` + `(on Windows: \`%USERPROFILE%\\.config\\gws\\<email>\`). ` + `Fix: prefix the command with the env var. ` + tail;
+  return `Bare \`gws\` blocked by ${pluginName}. ` + `The gws-multi-account layout requires \`${ENV_VAR}="$HOME/.config/gws/<email>"\` on every invocation ` + `(on Windows: \`%USERPROFILE%\\.config\\gws\\<email>\`). ` + (violation.accountShorthand ? violation.accountCommandNewline ? `\`${ACCOUNT_VAR}\` does not count because an unquoted line break makes the executed \`gws\` ambiguous. ` : violation.accountPathOverride ? `\`${ACCOUNT_VAR}\` does not count when the same command segment assigns \`PATH\`, because the hook can only verify the first executable \`gws\` on the hook's PATH. ` : violation.accountPathUncertain ? `\`${ACCOUNT_VAR}\` does not count because an earlier command segment could change which \`gws\` will run. ` : `\`${ACCOUNT_VAR}\` counts only when the first executable \`gws\` on the hook's PATH is the gws-accounts wrapper, and it is not. ` : "") + `Fix: prefix the command with the env var. ` + tail;
 }
 function splitSegments(command) {
   const out = [];
@@ -65,12 +190,12 @@ function splitSegments(command) {
   while ((match = re.exec(command)) !== null) {
     const text = command.slice(last, match.index).trim();
     if (text)
-      out.push({ text, backgrounded: match[0] === "&" });
+      out.push({ text, backgrounded: match[0] === "&", separator: match[0] });
     last = match.index + match[0].length;
   }
   const tail = command.slice(last).trim();
   if (tail)
-    out.push({ text: tail, backgrounded: false });
+    out.push({ text: tail, backgrounded: false, separator: null });
   return out;
 }
 function isAuthLoginCall(tokens, cmdIndex) {

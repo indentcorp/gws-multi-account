@@ -118,7 +118,7 @@ When the user wants to register a new account:
 5. Append the account to `accounts.json` (preserve existing entries). Use Node for cross-platform JSON merging — no `jq` dependency. Node is guaranteed present on any machine running Claude Code or opencode.
    ```bash
    GWS_ACCOUNTS_JSON="$HOME/.config/gws/accounts.json" EMAIL=<email> DESC=<description> \
-     node -e "const fs=require('fs'),p=process.env.GWS_ACCOUNTS_JSON;const d=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};d[process.env.EMAIL]={description:process.env.DESC};fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n');"
+     node -e "const fs=require('fs'),p=process.env.GWS_ACCOUNTS_JSON;const d=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};d[process.env.EMAIL]={...(d[process.env.EMAIL]||{}),description:process.env.DESC};fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n');"
    ```
 6. Verify:
    ```bash
@@ -194,7 +194,7 @@ Walk the user through this step by step. **Do not skip the confirmation.**
    done
 
    GWS_ACCOUNTS_JSON="$HOME/.config/gws/accounts.json" EMAIL="$EMAIL" DESC="$DESC" \
-     node -e "const fs=require('fs'),p=process.env.GWS_ACCOUNTS_JSON;const d=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};d[process.env.EMAIL]={description:process.env.DESC};fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n');"
+     node -e "const fs=require('fs'),p=process.env.GWS_ACCOUNTS_JSON;const d=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};d[process.env.EMAIL]={...(d[process.env.EMAIL]||{}),description:process.env.DESC};fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n');"
    ```
 
    **Windows (PowerShell):**
@@ -217,7 +217,7 @@ Walk the user through this step by step. **Do not skip the confirmation.**
    $env:GWS_ACCOUNTS_JSON = "$env:USERPROFILE\.config\gws\accounts.json"
    $env:EMAIL = $Email
    $env:DESC = $Desc
-   node -e "const fs=require('fs'),p=process.env.GWS_ACCOUNTS_JSON;const d=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};d[process.env.EMAIL]={description:process.env.DESC};fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n');"
+   node -e "const fs=require('fs'),p=process.env.GWS_ACCOUNTS_JSON;const d=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};d[process.env.EMAIL]={...(d[process.env.EMAIL]||{}),description:process.env.DESC};fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n');"
    ```
 
 6. **Verify the migration.** Use the platform-appropriate command from [Selecting an account](#selecting-an-account) above and expect the same `emailAddress` as before.

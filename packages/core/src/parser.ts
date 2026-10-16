@@ -1,4 +1,9 @@
+import { accessSync, closeSync, constants, openSync, readSync, statSync } from 'node:fs'
+import { delimiter, isAbsolute, join } from 'node:path'
+
 export const ENV_VAR = 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR'
+export const ACCOUNT_VAR = 'GWS_ACCOUNT'
+const ACCOUNTS_WRAPPER_MARKER = 'gws-accounts-wrapper'
 
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
 
@@ -20,55 +25,194 @@ export type ViolationKind = 'missing-env' | 'literal-tilde' | 'foreground-auth-l
 export interface Violation {
   kind: ViolationKind
   segment: string
+  // Set on a missing-env violation whose segment used the GWS_ACCOUNT
+  // shorthand, which did not count because the gws-accounts wrapper is not
+  // the first executable gws on the hook's PATH, because that segment assigns
+  // PATH, because an earlier same-shell segment could change resolution, or
+  // because an unquoted line break hides an unparsed command boundary.
+  accountShorthand?: boolean
+  accountCommandNewline?: boolean
+  accountPathOverride?: boolean
+  accountPathUncertain?: boolean
 }
 
-export function findViolation(command: string): Violation | null {
+// gws-accounts (github.com/sjawhar/gws-accounts) is a wrapper that turns
+// GWS_ACCOUNT=<name> into GOOGLE_WORKSPACE_CLI_CONFIG_DIR. Real gws ignores
+// GWS_ACCOUNT, so the shorthand counts only when the first executable regular
+// file named gws on the hook's PATH is that wrapper, which carries its marker
+// in its first 512 bytes.
+export function gwsOnPathIsAccountsWrapper(pathEnv: string = process.env.PATH ?? ''): boolean {
+  if (process.platform === 'win32') return false
+  for (const pathEntry of pathEnv.split(delimiter)) {
+    const dir = pathEntry || '.'
+    const candidate = join(dir, 'gws')
+    try {
+      if (!statSync(candidate).isFile()) continue
+      accessSync(candidate, constants.X_OK)
+    } catch {
+      continue
+    }
+    // This is the gws the shell runs: it is the wrapper only if its marker
+    // can be read.
+    let fd: number
+    try {
+      fd = openSync(candidate, 'r')
+    } catch {
+      return false
+    }
+    try {
+      const buf = Buffer.alloc(512)
+      const n = readSync(fd, buf, 0, 512, 0)
+      return buf.subarray(0, n).toString('latin1').includes(ACCOUNTS_WRAPPER_MARKER)
+    } catch {
+      return false
+    } finally {
+      closeSync(fd)
+    }
+  }
+  return false
+}
+
+export interface FindViolationOptions {
+  // Whether the first executable gws on the hook's PATH is the gws-accounts
+  // wrapper. Computed once per call and only when needed, if not given.
+  accountsWrapper?: boolean
+}
+
+export function findViolation(command: string, options: FindViolationOptions = {}): Violation | null {
+  let accountsWrapper = options.accountsWrapper
+  let shorthandPathIsStable = true
   const segments = splitSegments(command)
-  for (const { text, backgrounded } of segments) {
-    if (!GWS_WORD.test(text)) continue
+  for (const { text, backgrounded, separator } of segments) {
+    if (GWS_WORD.test(text)) {
+      // Walk the token prefix: env assignments and the `env` builtin are
+      // transparent; the first bare word is the real command. We only block
+      // when that word is literally `gws` AND neither the required env var nor
+      // the wrapper-gated GWS_ACCOUNT shorthand applies.
+      const tokens = text.split(/\s+/)
+      if (hasUnquotedCommandNewline(command) && commandUsesGwsAccountShorthand(tokens)) {
+        return { kind: 'missing-env', segment: text, accountShorthand: true, accountCommandNewline: true }
+      }
+      let hasEnv = false
+      let hasAccount = false
+      let hasPathAssignment = false
+      let quotedTildeValue = false
+      let cmdWord: string | null = null
+      let cmdIndex = -1
 
-    // Walk the token prefix: env assignments and the `env` builtin are
-    // transparent; the first bare word is the real command. We only block
-    // when that word is literally `gws` AND no prefix assignment set the
-    // required env var — this keeps `echo gws` and `grep gws` working.
-    const tokens = text.split(/\s+/)
+      for (let i = 0; i < tokens.length; i += 1) {
+        const tok = tokens[i]!
+        if (tok === 'env') continue
+        if (tok.startsWith(`${ENV_VAR}=`)) {
+          hasEnv = true
+          const value = tok.slice(ENV_VAR.length + 1)
+          if (QUOTED_TILDE.test(value)) quotedTildeValue = true
+          continue
+        }
+        if (tok.startsWith(`${ACCOUNT_VAR}=`) && tok.length > ACCOUNT_VAR.length + 1) {
+          hasAccount = true
+          continue
+        }
+        if (tok.startsWith('PATH=')) {
+          hasPathAssignment = true
+          continue
+        }
+        if (ENV_ASSIGNMENT.test(tok)) continue
+        cmdWord = tok
+        cmdIndex = i
+        break
+      }
+
+      if (cmdWord === 'gws') {
+        // `gws auth login` is an interactive OAuth flow that starts a localhost
+        // callback server and blocks waiting for a browser redirect. Foregrounded
+        // in an agent shell, it will time out (~60s) and kill the callback
+        // server, stranding the user with a dead URL. Catch it even when
+        // GOOGLE_WORKSPACE_CLI_CONFIG_DIR is set — the env var doesn't help when
+        // the real problem is foregrounding. Background spawns (trailing `&`)
+        // are exempt.
+        if (!backgrounded && isAuthLoginCall(tokens, cmdIndex)) {
+          return { kind: 'foreground-auth-login', segment: text }
+        }
+
+        if (!hasEnv) {
+          if (!hasAccount) return { kind: 'missing-env', segment: text }
+          if (hasPathAssignment) {
+            return { kind: 'missing-env', segment: text, accountShorthand: true, accountPathOverride: true }
+          }
+          if (!shorthandPathIsStable) {
+            return { kind: 'missing-env', segment: text, accountShorthand: true, accountPathUncertain: true }
+          }
+          accountsWrapper ??= gwsOnPathIsAccountsWrapper()
+          if (!accountsWrapper) return { kind: 'missing-env', segment: text, accountShorthand: true }
+        }
+        if (quotedTildeValue) return { kind: 'literal-tilde', segment: text }
+      }
+    }
+
+    if (sameShellSegmentMayChangeGwsResolution(text, separator)) {
+      shorthandPathIsStable = false
+    }
+  }
+  return null
+}
+
+function sameShellSegmentMayChangeGwsResolution(text: string, separator: string | null): boolean {
+  if (separator === null || separator === '|' || separator === '&') return false
+  return !isPlainDirectoryChange(text)
+}
+
+function isPlainDirectoryChange(text: string): boolean {
+  const tokens = text.split(/\s+/)
+  if ((tokens[0] !== 'cd' && tokens[0] !== 'pushd') || tokens.length > 2) return false
+  return !(process.env.PATH ?? '').split(delimiter).some((entry) => !entry || !isAbsolute(entry))
+}
+
+function hasUnquotedCommandNewline(command: string): boolean {
+  let quote: "'" | '"' | null = null
+  for (let i = 0; i < command.length; i += 1) {
+    const char = command[i]!
+    if (quote !== null) {
+      if (char === '\\' && quote === '"' && i + 1 < command.length) {
+        i += 1
+      } else if (char === quote) {
+        quote = null
+      }
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = char
+    } else if (char === '\\' && i + 1 < command.length) {
+      i += 1
+    } else if (char === '\n' || char === '\r') {
+      return true
+    }
+  }
+  return false
+}
+
+function commandUsesGwsAccountShorthand(tokens: string[]): boolean {
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (tokens[i] !== 'gws') continue
+    let hasAccount = false
     let hasEnv = false
-    let quotedTildeValue = false
-    let cmdWord: string | null = null
-    let cmdIndex = -1
-
-    for (let i = 0; i < tokens.length; i += 1) {
-      const tok = tokens[i]!
+    for (let j = i - 1; j >= 0; j -= 1) {
+      const tok = tokens[j]!
       if (tok === 'env') continue
       if (tok.startsWith(`${ENV_VAR}=`)) {
         hasEnv = true
-        const value = tok.slice(ENV_VAR.length + 1)
-        if (QUOTED_TILDE.test(value)) quotedTildeValue = true
+        continue
+      }
+      if (tok.startsWith(`${ACCOUNT_VAR}=`) && tok.length > ACCOUNT_VAR.length + 1) {
+        hasAccount = true
         continue
       }
       if (ENV_ASSIGNMENT.test(tok)) continue
-      cmdWord = tok
-      cmdIndex = i
       break
     }
-
-    if (cmdWord !== 'gws') continue
-
-    // `gws auth login` is an interactive OAuth flow that starts a localhost
-    // callback server and blocks waiting for a browser redirect. Foregrounded
-    // in an agent shell, it will time out (~60s) and kill the callback
-    // server, stranding the user with a dead URL. Catch it even when
-    // GOOGLE_WORKSPACE_CLI_CONFIG_DIR is set — the env var doesn't help when
-    // the real problem is foregrounding. Background spawns (trailing `&`)
-    // are exempt.
-    if (!backgrounded && isAuthLoginCall(tokens, cmdIndex)) {
-      return { kind: 'foreground-auth-login', segment: text }
-    }
-
-    if (!hasEnv) return { kind: 'missing-env', segment: text }
-    if (quotedTildeValue) return { kind: 'literal-tilde', segment: text }
+    if (hasAccount && !hasEnv) return true
   }
-  return null
+  return false
 }
 
 export function buildDenyMessage(violation: Violation, pluginName: string): string {
@@ -101,6 +245,15 @@ export function buildDenyMessage(violation: Violation, pluginName: string): stri
     `Bare \`gws\` blocked by ${pluginName}. ` +
     `The gws-multi-account layout requires \`${ENV_VAR}="$HOME/.config/gws/<email>"\` on every invocation ` +
     `(on Windows: \`%USERPROFILE%\\.config\\gws\\<email>\`). ` +
+    (violation.accountShorthand
+      ? violation.accountCommandNewline
+        ? `\`${ACCOUNT_VAR}\` does not count because an unquoted line break makes the executed \`gws\` ambiguous. `
+        : violation.accountPathOverride
+          ? `\`${ACCOUNT_VAR}\` does not count when the same command segment assigns \`PATH\`, because the hook can only verify the first executable \`gws\` on the hook's PATH. `
+          : violation.accountPathUncertain
+            ? `\`${ACCOUNT_VAR}\` does not count because an earlier command segment could change which \`gws\` will run. `
+            : `\`${ACCOUNT_VAR}\` counts only when the first executable \`gws\` on the hook's PATH is the gws-accounts wrapper, and it is not. `
+      : '') +
     `Fix: prefix the command with the env var. ` +
     tail
   )
@@ -109,6 +262,7 @@ export function buildDenyMessage(violation: Violation, pluginName: string): stri
 interface Segment {
   text: string
   backgrounded: boolean
+  separator: string | null
 }
 
 // Split on shell control operators (`;`, `&&`, `||`, `|`, `&`) so each
@@ -128,11 +282,11 @@ function splitSegments(command: string): Segment[] {
   let match: RegExpExecArray | null
   while ((match = re.exec(command)) !== null) {
     const text = command.slice(last, match.index).trim()
-    if (text) out.push({ text, backgrounded: match[0] === '&' })
+    if (text) out.push({ text, backgrounded: match[0] === '&', separator: match[0] })
     last = match.index + match[0].length
   }
   const tail = command.slice(last).trim()
-  if (tail) out.push({ text: tail, backgrounded: false })
+  if (tail) out.push({ text: tail, backgrounded: false, separator: null })
   return out
 }
 
