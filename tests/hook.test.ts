@@ -108,6 +108,30 @@ describe('GWS_ACCOUNT shorthand', () => {
     expect(findViolation(cmd, { accountsWrapper: true })?.kind).toBe('missing-env')
   })
 
+  test.each([
+    'export PATH=/replacement; GWS_ACCOUNT=work gws drive files list',
+    'PATH=/replacement; GWS_ACCOUNT=work gws drive files list',
+    'source /tmp/gws-setup; GWS_ACCOUNT=work gws drive files list',
+    'gws(){ :; }; GWS_ACCOUNT=work gws drive files list',
+  ])('denies a shorthand after a same-shell segment can change gws resolution: %s', (cmd) => {
+    const violation = findViolation(cmd, { accountsWrapper: true })
+    expect(violation?.kind).toBe('missing-env')
+    expect(buildDenyMessage(violation!, 'test-plugin')).toContain(
+      'an earlier command segment could change which `gws` will run',
+    )
+  })
+
+  test('allows a shorthand after cd when the hook PATH has only absolute entries', () => {
+    const previousPath = process.env.PATH
+    process.env.PATH = '/absolute'
+    try {
+      expect(findViolation('cd /repo && GWS_ACCOUNT=work gws drive files list', { accountsWrapper: true })).toBeNull()
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+    }
+  })
+
   test('an empty GWS_ACCOUNT does not count', () => {
     expect(findViolation('GWS_ACCOUNT= gws drive files list', { accountsWrapper: true })?.kind).toBe('missing-env')
   })
@@ -548,6 +572,45 @@ describe('claude code hook (smoke)', () => {
       try {
         const result = spawnSync(process.execPath, [hookPath], {
           input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'GWS_ACCOUNT=work gws x' } }),
+          encoding: 'utf8',
+          env: { ...process.env, PATH: wrapperDir },
+        })
+        expect(result.status).toBe(0)
+        expect((result.stdout ?? '').trim()).toBe('')
+      } finally {
+        fs.rmSync(wrapperDir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  test.each([
+    'export PATH=/replacement; GWS_ACCOUNT=work gws x',
+    'PATH=/replacement; GWS_ACCOUNT=work gws x',
+    'source /tmp/gws-setup; GWS_ACCOUNT=work gws x',
+    'gws(){ :; }; GWS_ACCOUNT=work gws x',
+  ])('denies shorthand after a same-shell segment can change gws resolution: %s', (command) => {
+    const wrapperDir = createGwsDir('#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
+    try {
+      const result = spawnSync(process.execPath, [hookPath], {
+        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
+        encoding: 'utf8',
+        env: { ...process.env, PATH: wrapperDir },
+      })
+      expect(result.status).toBe(0)
+      expect((result.stdout ?? '').trim()).toContain('"permissionDecision":"deny"')
+      expect((result.stdout ?? '').trim()).toContain('an earlier command segment could change which `gws` will run')
+    } finally {
+      fs.rmSync(wrapperDir, { recursive: true, force: true })
+    }
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'allows shorthand after cd when the hook PATH has only absolute entries',
+    () => {
+      const wrapperDir = createGwsDir('#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
+      try {
+        const result = spawnSync(process.execPath, [hookPath], {
+          input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'cd /repo && GWS_ACCOUNT=work gws x' } }),
           encoding: 'utf8',
           env: { ...process.env, PATH: wrapperDir },
         })
