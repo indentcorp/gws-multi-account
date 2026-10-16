@@ -22,6 +22,13 @@ describe('parser.findViolation', () => {
     ['bare gws after CR', 'true\rgws drive files list'],
     ['bare gws after a leading continuation', '\\\ngws drive files list'],
     ['bare gws with continued arguments', "gws drive files list \\\n--params '{}'"],
+    ['bare gws after a continued comment', '# comment \\\ngws a'],
+    ['bare gws after a continued trailing comment', 'true # c \\\ngws a'],
+    ['bare gws after a CRLF continued comment', '# comment \\\r\ngws a'],
+    [
+      'gws in a function body fails closed despite env on invocation',
+      'f() {\n  gws a\n}\nGOOGLE_WORKSPACE_CLI_CONFIG_DIR=x f',
+    ],
     ['gws-looking heredoc body fails closed', "cat <<'EOF'\ngws drive files list\nEOF"],
     ['bare gws after a heredoc', "cat <<'EOF'\ndata\nEOF\ngws drive files list"],
   ])('denies (missing-env): %s', (_label, cmd) => {
@@ -73,6 +80,9 @@ describe('parser.findViolation', () => {
     ['heredoc data without gws', "cat <<'EOF'\ndata\nEOF"],
     ['continued text remains an argument to its command', 'true \\\ngws drive files list'],
     ['CRLF continued text remains an argument to its command', 'true \\\r\ngws drive files list'],
+    ['hash inside a word is not a comment', 'echo value#comment \\\ngws a'],
+    ['hash inside double quotes is not a comment', 'echo "# comment \\\ngws a"'],
+    ['hash inside single quotes is not a comment', "echo '# comment \\\ngws a'"],
     ['my_gws_wrapper', 'my_gws_wrapper foo'],
     [
       'background auth login (nohup + redirect + &)',
@@ -417,6 +427,9 @@ describe('claude code hook (smoke)', () => {
     ['CRLF', 'true\r\ngws x'],
     ['leading continuation', '\\\ngws x'],
     ['leading CRLF continuation', '\\\r\ngws x'],
+    ['continued comment', '# comment \\\ngws x'],
+    ['continued trailing comment', 'true # c \\\ngws x'],
+    ['continued CRLF comment', '# comment \\\r\ngws x'],
   ])('denies bare gws after %s', (_label, command) => {
     const result = spawnSync('node', [hookPath], {
       input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
@@ -442,6 +455,18 @@ describe('claude code hook (smoke)', () => {
         tool_name: 'Bash',
         tool_input: { command: 'true\nGOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws x' },
       }),
+      encoding: 'utf8',
+    })
+    expect((result.stdout ?? '').trim()).toBe('')
+  })
+
+  test.each([
+    ['hash inside a word', 'echo value#comment \\\ngws x'],
+    ['hash inside double quotes', 'echo "# comment \\\ngws x"'],
+    ['hash inside single quotes', "echo '# comment \\\ngws x'"],
+  ])('allows a continued non-comment hash', (_label, command) => {
+    const result = spawnSync('node', [hookPath], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
       encoding: 'utf8',
     })
     expect((result.stdout ?? '').trim()).toBe('')

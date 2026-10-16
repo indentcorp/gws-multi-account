@@ -62,8 +62,15 @@ function splitSegments(command) {
   const joined = joinLineContinuations(command);
   let last = 0;
   let quote = null;
+  let comment = false;
   for (let i = 0;i < joined.length; i += 1) {
     const char = joined[i];
+    if (comment) {
+      if (char !== `
+` && char !== "\r")
+        continue;
+      comment = false;
+    }
     if (char === "\\" && quote !== "'") {
       i += 1;
       continue;
@@ -75,6 +82,10 @@ function splitSegments(command) {
     }
     if (char === "'" || char === '"') {
       quote = char;
+      continue;
+    }
+    if (char === "#" && isCommentStart(joined, i)) {
+      comment = true;
       continue;
     }
     let width = 0;
@@ -107,9 +118,18 @@ function splitSegments(command) {
 function joinLineContinuations(command) {
   let joined = null;
   let quote = null;
+  let comment = false;
   for (let i = 0;i < command.length; i += 1) {
     const char = command[i];
     const next = command[i + 1];
+    if (comment) {
+      if (char === `
+` || char === "\r")
+        comment = false;
+      if (joined !== null)
+        joined += char;
+      continue;
+    }
     if (char === "\\" && quote !== "'") {
       if (next === `
 `) {
@@ -141,9 +161,15 @@ function joinLineContinuations(command) {
         quote = null;
     } else if (char === "'" || char === '"') {
       quote = char;
+    } else if (char === "#" && isCommentStart(command, i)) {
+      comment = true;
     }
   }
   return joined ?? command;
+}
+function isCommentStart(command, index) {
+  return index === 0 || ` 	\r
+;|&()<>`.includes(command[index - 1]);
 }
 function isAuthLoginCall(tokens, cmdIndex) {
   const positional = [];

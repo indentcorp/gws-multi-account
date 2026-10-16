@@ -119,16 +119,21 @@ interface Segment {
 // which split produced each segment so the foreground-auth-login check can
 // skip legitimate background spawns like `nohup gws auth login ... &`.
 //
-// This is deliberately not a full shell parser: heredoc bodies are scanned
-// conservatively, so a body that looks like a bare `gws` command is denied.
+// This is deliberately not a full shell parser: heredoc and compound-command
+// bodies are scanned conservatively, so an apparent bare `gws` line is denied.
 function splitSegments(command: string): Segment[] {
   const out: Segment[] = []
   const joined = joinLineContinuations(command)
   let last = 0
   let quote: "'" | '"' | null = null
+  let comment = false
 
   for (let i = 0; i < joined.length; i += 1) {
     const char = joined[i]!
+    if (comment) {
+      if (char !== '\n' && char !== '\r') continue
+      comment = false
+    }
     if (char === '\\' && quote !== "'") {
       i += 1
       continue
@@ -139,6 +144,10 @@ function splitSegments(command: string): Segment[] {
     }
     if (char === "'" || char === '"') {
       quote = char
+      continue
+    }
+    if (char === '#' && isCommentStart(joined, i)) {
+      comment = true
       continue
     }
 
@@ -170,10 +179,16 @@ function splitSegments(command: string): Segment[] {
 function joinLineContinuations(command: string): string {
   let joined: string | null = null
   let quote: "'" | '"' | null = null
+  let comment = false
 
   for (let i = 0; i < command.length; i += 1) {
     const char = command[i]!
     const next = command[i + 1]
+    if (comment) {
+      if (char === '\n' || char === '\r') comment = false
+      if (joined !== null) joined += char
+      continue
+    }
     if (char === '\\' && quote !== "'") {
       if (next === '\n') {
         if (joined === null) joined = command.slice(0, i)
@@ -198,9 +213,15 @@ function joinLineContinuations(command: string): string {
       if (char === quote) quote = null
     } else if (char === "'" || char === '"') {
       quote = char
+    } else if (char === '#' && isCommentStart(command, i)) {
+      comment = true
     }
   }
   return joined ?? command
+}
+
+function isCommentStart(command: string, index: number): boolean {
+  return index === 0 || ' \t\r\n;|&()<>'.includes(command[index - 1]!)
 }
 
 // True when tokens[cmdIndex] is `gws` and the next two non-flag tokens are
