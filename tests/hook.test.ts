@@ -561,6 +561,16 @@ describe('opencode skill registration', () => {
 describe('claude code hook (smoke)', () => {
   const hookPath = path.resolve(import.meta.dir, '..', 'hooks', 'hook.js')
 
+  const nodePath = spawnSync('node', ['-p', 'process.execPath'], { encoding: 'utf8' }).stdout.trim()
+
+  function runHook(command: string, pathEnv: string) {
+    return spawnSync(nodePath, [hookPath], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
+      encoding: 'utf8',
+      env: { ...process.env, PATH: pathEnv },
+    })
+  }
+
   test('denies bare gws', () => {
     const result = spawnSync('node', [hookPath], {
       input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'gws x' } }),
@@ -587,11 +597,7 @@ describe('claude code hook (smoke)', () => {
     () => {
       const wrapperDir = createGwsDir('#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
       try {
-        const result = spawnSync(process.execPath, [hookPath], {
-          input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'GWS_ACCOUNT=work gws x' } }),
-          encoding: 'utf8',
-          env: { ...process.env, PATH: wrapperDir },
-        })
+        const result = runHook('GWS_ACCOUNT=work gws x', wrapperDir)
         expect(result.status).toBe(0)
         expect((result.stdout ?? '').trim()).toBe('')
       } finally {
@@ -608,11 +614,7 @@ describe('claude code hook (smoke)', () => {
   ])('denies shorthand after a same-shell segment can change gws resolution: %s', (command) => {
     const wrapperDir = createGwsDir('#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
     try {
-      const result = spawnSync(process.execPath, [hookPath], {
-        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
-        encoding: 'utf8',
-        env: { ...process.env, PATH: wrapperDir },
-      })
+      const result = runHook(command, wrapperDir)
       expect(result.status).toBe(0)
       expect((result.stdout ?? '').trim()).toContain('"permissionDecision":"deny"')
       expect((result.stdout ?? '').trim()).toContain('an earlier command segment could change which `gws` will run')
@@ -627,11 +629,7 @@ describe('claude code hook (smoke)', () => {
   ])('denies shorthand after an unquoted command newline: %s', (_label, command) => {
     const wrapperDir = createGwsDir('#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
     try {
-      const result = spawnSync(process.execPath, [hookPath], {
-        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
-        encoding: 'utf8',
-        env: { ...process.env, PATH: wrapperDir },
-      })
+      const result = runHook(command, wrapperDir)
       const out = (result.stdout ?? '').trim()
       expect(result.status).toBe(0)
       expect(out).toContain('"permissionDecision":"deny"')
@@ -644,11 +642,7 @@ describe('claude code hook (smoke)', () => {
   test.skipIf(process.platform === 'win32')('allows shorthand with a quoted newline argument', () => {
     const wrapperDir = createGwsDir('#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
     try {
-      const result = spawnSync(process.execPath, [hookPath], {
-        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'GWS_ACCOUNT=work gws x "line\nbreak"' } }),
-        encoding: 'utf8',
-        env: { ...process.env, PATH: wrapperDir },
-      })
+      const result = runHook('GWS_ACCOUNT=work gws x "line\nbreak"', wrapperDir)
       expect(result.status).toBe(0)
       expect((result.stdout ?? '').trim()).toBe('')
     } finally {
@@ -661,11 +655,7 @@ describe('claude code hook (smoke)', () => {
     () => {
       const wrapperDir = createGwsDir('#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
       try {
-        const result = spawnSync(process.execPath, [hookPath], {
-          input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'cd /repo && GWS_ACCOUNT=work gws x' } }),
-          encoding: 'utf8',
-          env: { ...process.env, PATH: wrapperDir },
-        })
+        const result = runHook('cd /repo && GWS_ACCOUNT=work gws x', wrapperDir)
         expect(result.status).toBe(0)
         expect((result.stdout ?? '').trim()).toBe('')
       } finally {
@@ -677,11 +667,7 @@ describe('claude code hook (smoke)', () => {
   test('denies GWS_ACCOUNT shorthand when the hook process PATH lacks the wrapper', () => {
     const gwsDir = createGwsDir('#!/usr/bin/env node\n')
     try {
-      const result = spawnSync(process.execPath, [hookPath], {
-        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'GWS_ACCOUNT=work gws x' } }),
-        encoding: 'utf8',
-        env: { ...process.env, PATH: gwsDir },
-      })
+      const result = runHook('GWS_ACCOUNT=work gws x', gwsDir)
       const out = (result.stdout ?? '').trim()
       expect(result.status).toBe(0)
       expect(out).toContain('"permissionDecision":"deny"')
