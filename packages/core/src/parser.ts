@@ -28,8 +28,10 @@ export interface Violation {
   // Set on a missing-env violation whose segment used the GWS_ACCOUNT
   // shorthand, which did not count because the gws-accounts wrapper is not
   // the first executable gws on the hook's PATH, because that segment assigns
-  // PATH, or because an earlier same-shell segment could change resolution.
+  // PATH, because an earlier same-shell segment could change resolution, or
+  // because an unquoted line break hides an unparsed command boundary.
   accountShorthand?: boolean
+  accountCommandNewline?: boolean
   accountPathOverride?: boolean
   accountPathUncertain?: boolean
 }
@@ -88,6 +90,9 @@ export function findViolation(command: string, options: FindViolationOptions = {
       // when that word is literally `gws` AND neither the required env var nor
       // the wrapper-gated GWS_ACCOUNT shorthand applies.
       const tokens = text.split(/\s+/)
+      if (hasUnquotedCommandNewline(command) && commandUsesGwsAccountShorthand(tokens)) {
+        return { kind: 'missing-env', segment: text, accountShorthand: true, accountCommandNewline: true }
+      }
       let hasEnv = false
       let hasAccount = false
       let hasPathAssignment = false
@@ -163,6 +168,53 @@ function isPlainDirectoryChange(text: string): boolean {
   return !(process.env.PATH ?? '').split(delimiter).some((entry) => !entry || !isAbsolute(entry))
 }
 
+function hasUnquotedCommandNewline(command: string): boolean {
+  let quote: "'" | '"' | null = null
+  for (let i = 0; i < command.length; i += 1) {
+    const char = command[i]!
+    if (quote !== null) {
+      if (char === '\\' && quote === '"' && i + 1 < command.length) {
+        i += 1
+      } else if (char === quote) {
+        quote = null
+      }
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = char
+    } else if (char === '\\' && i + 1 < command.length) {
+      i += 1
+    } else if (char === '\n' || char === '\r') {
+      return true
+    }
+  }
+  return false
+}
+
+function commandUsesGwsAccountShorthand(tokens: string[]): boolean {
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (tokens[i] !== 'gws') continue
+    let hasAccount = false
+    let hasEnv = false
+    for (let j = i - 1; j >= 0; j -= 1) {
+      const tok = tokens[j]!
+      if (tok === 'env') continue
+      if (tok.startsWith(`${ENV_VAR}=`)) {
+        hasEnv = true
+        continue
+      }
+      if (tok.startsWith(`${ACCOUNT_VAR}=`) && tok.length > ACCOUNT_VAR.length + 1) {
+        hasAccount = true
+        continue
+      }
+      if (ENV_ASSIGNMENT.test(tok)) continue
+      break
+    }
+    if (hasAccount && !hasEnv) return true
+  }
+  return false
+}
+
 export function buildDenyMessage(violation: Violation, pluginName: string): string {
   const tail = `Offending segment: \`${violation.segment}\`. See \`~/.config/gws/accounts.json\` for configured accounts.`
 
@@ -194,11 +246,13 @@ export function buildDenyMessage(violation: Violation, pluginName: string): stri
     `The gws-multi-account layout requires \`${ENV_VAR}="$HOME/.config/gws/<email>"\` on every invocation ` +
     `(on Windows: \`%USERPROFILE%\\.config\\gws\\<email>\`). ` +
     (violation.accountShorthand
-      ? violation.accountPathOverride
-        ? `\`${ACCOUNT_VAR}\` does not count when the same command segment assigns \`PATH\`, because the hook can only verify the first executable \`gws\` on the hook's PATH. `
-        : violation.accountPathUncertain
-          ? `\`${ACCOUNT_VAR}\` does not count because an earlier command segment could change which \`gws\` will run. `
-          : `\`${ACCOUNT_VAR}\` counts only when the first executable \`gws\` on the hook's PATH is the gws-accounts wrapper, and it is not. `
+      ? violation.accountCommandNewline
+        ? `\`${ACCOUNT_VAR}\` does not count because an unquoted line break makes the executed \`gws\` ambiguous. `
+        : violation.accountPathOverride
+          ? `\`${ACCOUNT_VAR}\` does not count when the same command segment assigns \`PATH\`, because the hook can only verify the first executable \`gws\` on the hook's PATH. `
+          : violation.accountPathUncertain
+            ? `\`${ACCOUNT_VAR}\` does not count because an earlier command segment could change which \`gws\` will run. `
+            : `\`${ACCOUNT_VAR}\` counts only when the first executable \`gws\` on the hook's PATH is the gws-accounts wrapper, and it is not. `
       : '') +
     `Fix: prefix the command with the env var. ` +
     tail

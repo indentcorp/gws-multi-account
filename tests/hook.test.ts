@@ -121,6 +121,23 @@ describe('GWS_ACCOUNT shorthand', () => {
     )
   })
 
+  test.each([
+    ['line feed', 'export PATH=/replacement\nGWS_ACCOUNT=work gws drive files list'],
+    ['carriage return and line feed', 'cd /replacement\r\nGWS_ACCOUNT=work gws drive files list'],
+  ])('denies a shorthand after an unquoted command newline: %s', (_label, cmd) => {
+    const violation = findViolation(cmd, { accountsWrapper: true })
+    expect(violation?.kind).toBe('missing-env')
+    expect(buildDenyMessage(violation!, 'test-plugin')).toContain(
+      'an unquoted line break makes the executed `gws` ambiguous',
+    )
+  })
+
+  test('allows a shorthand with a quoted newline argument', () => {
+    expect(
+      findViolation('GWS_ACCOUNT=work gws drive files list --query "line\nbreak"', { accountsWrapper: true }),
+    ).toBeNull()
+  })
+
   test('allows a shorthand after cd when the hook PATH has only absolute entries', () => {
     const previousPath = process.env.PATH
     process.env.PATH = '/absolute'
@@ -599,6 +616,41 @@ describe('claude code hook (smoke)', () => {
       expect(result.status).toBe(0)
       expect((result.stdout ?? '').trim()).toContain('"permissionDecision":"deny"')
       expect((result.stdout ?? '').trim()).toContain('an earlier command segment could change which `gws` will run')
+    } finally {
+      fs.rmSync(wrapperDir, { recursive: true, force: true })
+    }
+  })
+
+  test.each([
+    ['line feed', 'export PATH=/replacement\nGWS_ACCOUNT=work gws x'],
+    ['carriage return and line feed', 'cd /replacement\r\nGWS_ACCOUNT=work gws x'],
+  ])('denies shorthand after an unquoted command newline: %s', (_label, command) => {
+    const wrapperDir = createGwsDir('#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
+    try {
+      const result = spawnSync(process.execPath, [hookPath], {
+        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
+        encoding: 'utf8',
+        env: { ...process.env, PATH: wrapperDir },
+      })
+      const out = (result.stdout ?? '').trim()
+      expect(result.status).toBe(0)
+      expect(out).toContain('"permissionDecision":"deny"')
+      expect(out).toContain('an unquoted line break makes the executed `gws` ambiguous')
+    } finally {
+      fs.rmSync(wrapperDir, { recursive: true, force: true })
+    }
+  })
+
+  test.skipIf(process.platform === 'win32')('allows shorthand with a quoted newline argument', () => {
+    const wrapperDir = createGwsDir('#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
+    try {
+      const result = spawnSync(process.execPath, [hookPath], {
+        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'GWS_ACCOUNT=work gws x "line\nbreak"' } }),
+        encoding: 'utf8',
+        env: { ...process.env, PATH: wrapperDir },
+      })
+      expect(result.status).toBe(0)
+      expect((result.stdout ?? '').trim()).toBe('')
     } finally {
       fs.rmSync(wrapperDir, { recursive: true, force: true })
     }
