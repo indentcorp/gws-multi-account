@@ -27,18 +27,21 @@ export interface Violation {
   segment: string
   // Set on a missing-env violation whose segment used the GWS_ACCOUNT
   // shorthand, which did not count because the gws-accounts wrapper is not
-  // the first gws on PATH.
+  // the first executable gws on the hook's PATH, or because that segment
+  // assigns PATH and therefore changes what gws would resolve to.
   accountShorthand?: boolean
+  accountPathOverride?: boolean
 }
 
 // gws-accounts (github.com/sjawhar/gws-accounts) is a wrapper that turns
 // GWS_ACCOUNT=<name> into GOOGLE_WORKSPACE_CLI_CONFIG_DIR. Real gws ignores
-// GWS_ACCOUNT, so the shorthand counts only when the gws the shell would run
-// (the first executable regular file named gws on PATH) is that wrapper,
-// which carries its marker in its first 512 bytes.
+// GWS_ACCOUNT, so the shorthand counts only when the first executable regular
+// file named gws on the hook's PATH is that wrapper, which carries its marker
+// in its first 512 bytes.
 export function gwsOnPathIsAccountsWrapper(pathEnv: string = process.env.PATH ?? ''): boolean {
-  for (const dir of pathEnv.split(delimiter)) {
-    if (!dir) continue
+  if (process.platform === 'win32') return false
+  for (const pathEntry of pathEnv.split(delimiter)) {
+    const dir = pathEntry || '.'
     const candidate = join(dir, 'gws')
     try {
       if (!statSync(candidate).isFile()) continue
@@ -68,8 +71,8 @@ export function gwsOnPathIsAccountsWrapper(pathEnv: string = process.env.PATH ??
 }
 
 export interface FindViolationOptions {
-  // Whether the first gws on PATH is the gws-accounts wrapper. Computed from
-  // PATH, once per call and only when needed, if not given.
+  // Whether the first executable gws on the hook's PATH is the gws-accounts
+  // wrapper. Computed once per call and only when needed, if not given.
   accountsWrapper?: boolean
 }
 
@@ -81,11 +84,12 @@ export function findViolation(command: string, options: FindViolationOptions = {
 
     // Walk the token prefix: env assignments and the `env` builtin are
     // transparent; the first bare word is the real command. We only block
-    // when that word is literally `gws` AND no prefix assignment set the
-    // required env var — this keeps `echo gws` and `grep gws` working.
+    // when that word is literally `gws` AND neither the required env var nor
+    // the wrapper-gated GWS_ACCOUNT shorthand applies.
     const tokens = text.split(/\s+/)
     let hasEnv = false
     let hasAccount = false
+    let hasPathAssignment = false
     let quotedTildeValue = false
     let cmdWord: string | null = null
     let cmdIndex = -1
@@ -101,6 +105,10 @@ export function findViolation(command: string, options: FindViolationOptions = {
       }
       if (tok.startsWith(`${ACCOUNT_VAR}=`) && tok.length > ACCOUNT_VAR.length + 1) {
         hasAccount = true
+        continue
+      }
+      if (tok.startsWith('PATH=')) {
+        hasPathAssignment = true
         continue
       }
       if (ENV_ASSIGNMENT.test(tok)) continue
@@ -124,6 +132,9 @@ export function findViolation(command: string, options: FindViolationOptions = {
 
     if (!hasEnv) {
       if (!hasAccount) return { kind: 'missing-env', segment: text }
+      if (hasPathAssignment) {
+        return { kind: 'missing-env', segment: text, accountShorthand: true, accountPathOverride: true }
+      }
       accountsWrapper ??= gwsOnPathIsAccountsWrapper()
       if (accountsWrapper) continue
       return { kind: 'missing-env', segment: text, accountShorthand: true }
@@ -164,7 +175,9 @@ export function buildDenyMessage(violation: Violation, pluginName: string): stri
     `The gws-multi-account layout requires \`${ENV_VAR}="$HOME/.config/gws/<email>"\` on every invocation ` +
     `(on Windows: \`%USERPROFILE%\\.config\\gws\\<email>\`). ` +
     (violation.accountShorthand
-      ? `\`${ACCOUNT_VAR}\` counts only when the first \`gws\` on PATH is the gws-accounts wrapper, and it is not. `
+      ? violation.accountPathOverride
+        ? `\`${ACCOUNT_VAR}\` does not count when the same command segment assigns \`PATH\`, because the hook can only verify the first executable \`gws\` on the hook's PATH. `
+        : `\`${ACCOUNT_VAR}\` counts only when the first executable \`gws\` on the hook's PATH is the gws-accounts wrapper, and it is not. `
       : '') +
     `Fix: prefix the command with the env var. ` +
     tail

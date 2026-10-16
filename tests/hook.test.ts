@@ -10,6 +10,18 @@ const opencodeModule = await import('../packages/opencode/src/plugin.js')
 const typeclawModule = await import('../packages/typeclaw/src/plugin.js')
 const omoModule = await import('../packages/omo/src/extension.js')
 
+function createGwsDir(contents: string | null, mode = 0o755): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gws-path-'))
+  const gws = path.join(dir, 'gws')
+  if (contents === null) {
+    fs.mkdirSync(gws)
+  } else {
+    fs.writeFileSync(gws, contents)
+    fs.chmodSync(gws, mode)
+  }
+  return dir
+}
+
 describe('parser.findViolation', () => {
   test.each([
     ['bare gws', 'gws gmail users getProfile'],
@@ -89,6 +101,13 @@ describe('GWS_ACCOUNT shorthand', () => {
     expect(findViolation('GWS_ACCOUNT=work gws drive files list', { accountsWrapper: false })?.kind).toBe('missing-env')
   })
 
+  test.each([
+    'PATH=/replacement GWS_ACCOUNT=work gws drive files list',
+    'env PATH=/replacement GWS_ACCOUNT=work gws drive files list',
+  ])('denies a shorthand when the segment replaces PATH: %s', (cmd) => {
+    expect(findViolation(cmd, { accountsWrapper: true })?.kind).toBe('missing-env')
+  })
+
   test('an empty GWS_ACCOUNT does not count', () => {
     expect(findViolation('GWS_ACCOUNT= gws drive files list', { accountsWrapper: true })?.kind).toBe('missing-env')
   })
@@ -115,7 +134,7 @@ describe('GWS_ACCOUNT shorthand', () => {
   test('a denied shorthand says why it did not count', () => {
     const violation = findViolation('GWS_ACCOUNT=work gws drive files list', { accountsWrapper: false })!
     expect(buildDenyMessage(violation, 'test-plugin')).toContain(
-      '`GWS_ACCOUNT` counts only when the first `gws` on PATH is the gws-accounts wrapper, and it is not. ',
+      "`GWS_ACCOUNT` counts only when the first executable `gws` on the hook's PATH is the gws-accounts wrapper, and it is not. ",
     )
   })
 })
@@ -128,15 +147,8 @@ describe('gwsOnPathIsAccountsWrapper', () => {
   // A PATH entry holding a `gws` file with these contents and mode, or a
   // directory named `gws` when contents is null.
   function gwsDir(contents: string | null, mode = 0o755): string {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gws-path-'))
+    const dir = createGwsDir(contents, mode)
     dirs.push(dir)
-    const gws = path.join(dir, 'gws')
-    if (contents === null) {
-      fs.mkdirSync(gws)
-    } else {
-      fs.writeFileSync(gws, contents)
-      fs.chmodSync(gws, mode)
-    }
     return dir
   }
 
@@ -146,12 +158,37 @@ describe('gwsOnPathIsAccountsWrapper', () => {
 
   const onPath = (...entries: string[]) => gwsOnPathIsAccountsWrapper(entries.join(path.delimiter))
 
-  test('detects the wrapper by its marker, first gws on PATH only', () => {
+  test.skipIf(process.platform === 'win32')('detects the wrapper by its marker, first gws on PATH only', () => {
     const wrapperDir = gwsDir(WRAPPER)
     const realDir = gwsDir(REAL)
     expect(onPath(wrapperDir, realDir)).toBe(true)
     expect(onPath(realDir, wrapperDir)).toBe(false)
-    expect(gwsOnPathIsAccountsWrapper('')).toBe(false)
+  })
+
+  test.skipIf(process.platform === 'win32')('uses the hook process PATH when options are omitted', () => {
+    const previousPath = process.env.PATH
+    process.env.PATH = gwsDir(WRAPPER)
+    try {
+      expect(findViolation('GWS_ACCOUNT=work gws drive files list')).toBeNull()
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+    }
+  })
+
+  test.skipIf(process.platform === 'win32')('treats an empty PATH entry as the current directory', () => {
+    const previousCwd = process.cwd()
+    const wrapperDir = gwsDir(WRAPPER)
+    try {
+      process.chdir(wrapperDir)
+      expect(gwsOnPathIsAccountsWrapper('')).toBe(true)
+    } finally {
+      process.chdir(previousCwd)
+    }
+  })
+
+  test.skipIf(process.platform !== 'win32')('fails closed on Windows because PATHEXT is not modelled', () => {
+    expect(onPath(gwsDir(WRAPPER))).toBe(false)
   })
 
   test('skips a directory named gws, as the shell does', () => {
@@ -502,6 +539,41 @@ describe('claude code hook (smoke)', () => {
       encoding: 'utf8',
     })
     expect((result.stdout ?? '').trim()).toBe('')
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'allows GWS_ACCOUNT shorthand when the hook process PATH finds the wrapper',
+    () => {
+      const wrapperDir = createGwsDir('#!/usr/bin/env bash\n# gws-accounts-wrapper: test\n')
+      try {
+        const result = spawnSync(process.execPath, [hookPath], {
+          input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'GWS_ACCOUNT=work gws x' } }),
+          encoding: 'utf8',
+          env: { ...process.env, PATH: wrapperDir },
+        })
+        expect(result.status).toBe(0)
+        expect((result.stdout ?? '').trim()).toBe('')
+      } finally {
+        fs.rmSync(wrapperDir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  test('denies GWS_ACCOUNT shorthand when the hook process PATH lacks the wrapper', () => {
+    const gwsDir = createGwsDir('#!/usr/bin/env node\n')
+    try {
+      const result = spawnSync(process.execPath, [hookPath], {
+        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'GWS_ACCOUNT=work gws x' } }),
+        encoding: 'utf8',
+        env: { ...process.env, PATH: gwsDir },
+      })
+      const out = (result.stdout ?? '').trim()
+      expect(result.status).toBe(0)
+      expect(out).toContain('"permissionDecision":"deny"')
+      expect(out).toContain("the first executable `gws` on the hook's PATH")
+    } finally {
+      fs.rmSync(gwsDir, { recursive: true, force: true })
+    }
   })
 
   test('denies quoted literal tilde with $HOME hint', () => {
