@@ -59,19 +59,91 @@ function buildDenyMessage(violation, pluginName) {
 }
 function splitSegments(command) {
   const out = [];
-  const re = /&&|\|\||;|\||&/g;
+  const joined = joinLineContinuations(command);
   let last = 0;
-  let match;
-  while ((match = re.exec(command)) !== null) {
-    const text = command.slice(last, match.index).trim();
+  let quote = null;
+  for (let i = 0;i < joined.length; i += 1) {
+    const char = joined[i];
+    if (char === "\\" && quote !== "'") {
+      i += 1;
+      continue;
+    }
+    if (quote) {
+      if (char === quote)
+        quote = null;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    let width = 0;
+    let backgrounded = false;
+    if (char === "&") {
+      width = joined[i + 1] === "&" ? 2 : 1;
+      backgrounded = width === 1;
+    } else if (char === "|") {
+      width = joined[i + 1] === "|" ? 2 : 1;
+    } else if (char === ";" || char === `
+`) {
+      width = 1;
+    } else if (char === "\r") {
+      width = joined[i + 1] === `
+` ? 2 : 1;
+    }
+    if (width === 0)
+      continue;
+    const text = joined.slice(last, i).trim();
     if (text)
-      out.push({ text, backgrounded: match[0] === "&" });
-    last = match.index + match[0].length;
+      out.push({ text, backgrounded });
+    last = i + width;
+    i += width - 1;
   }
-  const tail = command.slice(last).trim();
+  const tail = joined.slice(last).trim();
   if (tail)
     out.push({ text: tail, backgrounded: false });
   return out;
+}
+function joinLineContinuations(command) {
+  let joined = null;
+  let quote = null;
+  for (let i = 0;i < command.length; i += 1) {
+    const char = command[i];
+    const next = command[i + 1];
+    if (char === "\\" && quote !== "'") {
+      if (next === `
+`) {
+        if (joined === null)
+          joined = command.slice(0, i);
+        i += 1;
+        continue;
+      }
+      if (next === "\r" && command[i + 2] === `
+`) {
+        if (joined === null)
+          joined = command.slice(0, i);
+        i += 2;
+        continue;
+      }
+      if (joined !== null) {
+        joined += char;
+        if (next)
+          joined += next;
+      }
+      if (next)
+        i += 1;
+      continue;
+    }
+    if (joined !== null)
+      joined += char;
+    if (quote) {
+      if (char === quote)
+        quote = null;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    }
+  }
+  return joined ?? command;
 }
 function isAuthLoginCall(tokens, cmdIndex) {
   const positional = [];

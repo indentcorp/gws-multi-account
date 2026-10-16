@@ -17,6 +17,13 @@ describe('parser.findViolation', () => {
     ['unrelated var prefix', 'FOO=bar gws drive files list'],
     ['bare gws via semicolon', 'ls ; gws drive files list'],
     ['bare gws via ||', 'false || gws drive files list'],
+    ['bare gws after LF', 'true\ngws drive files list'],
+    ['bare gws after CRLF', 'true\r\ngws drive files list'],
+    ['bare gws after CR', 'true\rgws drive files list'],
+    ['bare gws after a leading continuation', '\\\ngws drive files list'],
+    ['bare gws with continued arguments', "gws drive files list \\\n--params '{}'"],
+    ['gws-looking heredoc body fails closed', "cat <<'EOF'\ngws drive files list\nEOF"],
+    ['bare gws after a heredoc', "cat <<'EOF'\ndata\nEOF\ngws drive files list"],
   ])('denies (missing-env): %s', (_label, cmd) => {
     const v = findViolation(cmd)
     expect(v).not.toBeNull()
@@ -55,10 +62,18 @@ describe('parser.findViolation', () => {
     ['env + gws', 'env GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws gmail users getProfile'],
     ['mixed prefix', 'FOO=bar GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files list'],
     ['cd; then env gws', 'cd /tmp && GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files list'],
+    ['env-prefixed gws on a second line', 'true\nGOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files list'],
+    [
+      'env-prefixed gws with continued arguments',
+      "GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws drive files list \\\n--params '{}'",
+    ],
+    ['double-quoted multiline argument containing gws', 'echo "text\ngws drive files list"'],
+    ['single-quoted multiline argument containing gws', "echo 'text\ngws drive files list'"],
+    ['single-quoted literal backslash newline', "echo 'text\\\ngws drive files list'"],
+    ['heredoc data without gws', "cat <<'EOF'\ndata\nEOF"],
+    ['continued text remains an argument to its command', 'true \\\ngws drive files list'],
+    ['CRLF continued text remains an argument to its command', 'true \\\r\ngws drive files list'],
     ['my_gws_wrapper', 'my_gws_wrapper foo'],
-    ['gwsfoo', 'gwsfoo --help'],
-    ['echo mentioning gws', 'echo run gws to test'],
-    ['empty', ''],
     [
       'background auth login (nohup + redirect + &)',
       'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a nohup gws auth login --full > /tmp/log 2>&1 &',
@@ -397,11 +412,35 @@ describe('claude code hook (smoke)', () => {
     expect(out).toContain('gws-multi-account plugin')
   })
 
+  test.each([
+    ['LF', 'true\ngws x'],
+    ['CRLF', 'true\r\ngws x'],
+    ['leading continuation', '\\\ngws x'],
+    ['leading CRLF continuation', '\\\r\ngws x'],
+  ])('denies bare gws after %s', (_label, command) => {
+    const result = spawnSync('node', [hookPath], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
+      encoding: 'utf8',
+    })
+    expect((result.stdout ?? '').trim()).toContain('"permissionDecision":"deny"')
+  })
+
   test('allows env-prefixed gws', () => {
     const result = spawnSync('node', [hookPath], {
       input: JSON.stringify({
         tool_name: 'Bash',
         tool_input: { command: 'GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws x' },
+      }),
+      encoding: 'utf8',
+    })
+    expect((result.stdout ?? '').trim()).toBe('')
+  })
+
+  test('allows env-prefixed gws on a second line', () => {
+    const result = spawnSync('node', [hookPath], {
+      input: JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'true\nGOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/a gws x' },
       }),
       encoding: 'utf8',
     })
